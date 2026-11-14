@@ -13,8 +13,8 @@ import pathlib
 import secrets
 import sys
 
-if len(sys.argv) != 2 or len(sys.argv[1]) < 6:
-    sys.exit('Usage: python set_passcode.py "new-passcode"   (at least 6 characters)')
+if len(sys.argv) != 2 or len(sys.argv[1]) < 4:
+    sys.exit('Usage: python set_passcode.py "new-passcode"   (at least 4 characters)')
 
 salt = secrets.token_hex(8)
 digest = hashlib.sha256((salt + ':' + sys.argv[1]).encode('utf-8')).hexdigest()

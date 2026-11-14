@@ -53,7 +53,22 @@
 
   <div id="toast" class="toast hidden"></div>
 
+  <div id="login" class="login hidden">
+    <form id="login-form" class="login-card" autocomplete="on">
+      <img src="icon.svg" alt="" width="56" height="56">
+      <h1>FireLine Field</h1>
+      <p class="hint">Crew sign-in</p>
+      <label class="f">Your name<input name="name" required autocomplete="name" placeholder="J. Smith"></label>
+      <label class="f">Crew / resource<input name="crew" required placeholder="E-341, Div A, Hotshots…"></label>
+      <label class="f">Crew passcode<input name="pass" type="password" required autocomplete="current-password"></label>
+      <div id="login-err" class="login-err hidden">Wrong passcode. Check with your crew boss.</div>
+      <button class="btn primary block" type="submit">Sign in</button>
+      <p class="hint small">You stay signed in on this device, so the app still opens with no signal.</p>
+    </form>
+  </div>
+
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="config.js"></script>
   <script src="db.js"></script>
   <script src="app.js"></script>
 </body>

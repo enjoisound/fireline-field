@@ -96,6 +96,15 @@ label.f textarea { min-height: 64px; resize: vertical; }
 
 .toast { position: fixed; z-index: 2000; left: 50%; top: 60px; transform: translateX(-50%);
   background: #0f0b08; border: 1px solid var(--accent); padding: 8px 14px; border-radius: 10px; font-size: 14px; max-width: 90vw; }
+.login { position: fixed; inset: 0; z-index: 3000; display: flex; align-items: center; justify-content: center;
+  padding: 16px; background: radial-gradient(circle at 50% 30%, #3a2314, var(--bg) 70%); overflow-y: auto; }
+.login-card { width: 100%; max-width: 360px; padding: 24px 20px; border-radius: 16px; background: var(--panel);
+  border: 1px solid var(--line); border-top: 3px solid var(--accent); text-align: center; }
+.login-card h1 { margin: 8px 0 0; font-size: 22px; }
+.login-card label.f { text-align: left; }
+.login-card .btn.block { margin-top: 16px; padding: 12px; font-size: 16px; }
+.login-card .small { font-size: 12px; margin-top: 12px; }
+.login-err { margin-top: 10px; padding: 8px; border-radius: 8px; background: #4a1f20; color: #ffb3b5; font-size: 13px; }
 .hidden { display: none !important; }
 /* while drawing, every tap goes to the map, not to existing features */
 .drawing .leaflet-interactive, .drawing .leaflet-marker-icon { pointer-events: none !important; }

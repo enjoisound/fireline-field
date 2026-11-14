@@ -703,6 +703,9 @@ function renderData(el) {
     <p class="hint">Downloads basemap tiles for the area on screen (this zoom + 3 more levels) so the map works with no signal. Last-loaded NIFC layers are also kept for offline viewing.</p>
     <button class="btn block" id="x-tiles">Download this area (${S.basemap})</button>
     <div class="hint" id="x-prog"></div>
+    <h3>Signed in</h3>
+    <div class="row"><span class="grow">${esc(S.session?.name || '—')}<small>${esc(S.session?.crew || '')}</small></span>
+      <button class="btn" id="x-out">Sign out</button></div>
     <h3>Danger zone</h3>
     <button class="btn danger" id="x-wipe">Delete all my data</button>`));
   $('#x-geo', el).onclick = () => download(`fireline-${stamp()}.geojson`, JSON.stringify(toGeoJSON(), null, 1), 'application/geo+json');
@@ -710,6 +713,7 @@ function renderData(el) {
   $('#x-share', el).onclick = shareData;
   $('#x-imp', el).onchange = importFile;
   $('#x-tiles', el).onclick = downloadTiles;
+  $('#x-out', el).onclick = signOut;
   $('#x-wipe', el).onclick = async () => {
     if (!confirm('Delete ALL collected features, triage and tracks on this device? Export first if you need them.')) return;
     await DB.clear('features'); await DB.clear('tracks'); S.features = []; S.track = null;
@@ -839,7 +843,46 @@ function saveSettings() {
 }
 map.on('moveend', saveSettings);
 
+// ---------------------------------------------------------------- crew sign-in
+// Casual gate only: the site is public and static, so this keeps out passers-by, not attackers.
+const CFG = window.FIRELINE_CONFIG || {};
+async function hashPass(pass) {
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(CFG.passSalt + ':' + pass));
+  return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+function getSession() {
+  try {
+    const s = JSON.parse(localStorage.getItem('session') || 'null');
+    return s && s.passHash === CFG.passHash ? s : null; // a new passcode signs everyone out
+  } catch { return null; }
+}
+function requireLogin() {
+  return new Promise((resolve) => {
+    const existing = getSession();
+    if (existing || !CFG.passHash) return resolve(existing);
+    const box = $('#login'), form = $('#login-form'), err = $('#login-err');
+    form.elements.name.value = localStorage.getItem('by') || '';
+    box.classList.remove('hidden');
+    form.onsubmit = async (e) => {
+      e.preventDefault();
+      if ((await hashPass(form.elements.pass.value)) !== CFG.passHash) {
+        err.classList.remove('hidden'); form.elements.pass.value = ''; form.elements.pass.focus(); return;
+      }
+      const s = { name: form.elements.name.value.trim(), crew: form.elements.crew.value.trim(), passHash: CFG.passHash, at: Date.now() };
+      localStorage.setItem('session', JSON.stringify(s));
+      localStorage.setItem('by', `${s.name} (${s.crew})`);
+      form.elements.pass.value = ''; err.classList.add('hidden'); box.classList.add('hidden');
+      resolve(s);
+    };
+  });
+}
+function signOut() {
+  if (!confirm('Sign out? Your collected data stays on this device.')) return;
+  localStorage.removeItem('session'); location.reload();
+}
+
 async function init() {
+  S.session = await requireLogin();
   try {
     const st = JSON.parse(localStorage.getItem('settings') || 'null');
     if (st) {

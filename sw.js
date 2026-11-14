@@ -1,8 +1,8 @@
 // Service worker: makes the app open and the map draw with no signal.
-const SHELL = 'fireline-shell-v1';
+const SHELL = 'fireline-shell-v2';
 const TILES = 'fireline-tiles';
 const SHELL_FILES = [
-  './', 'index.html', 'styles.css', 'app.js', 'db.js', 'icon.svg', 'manifest.webmanifest',
+  './', 'index.html', 'styles.css', 'app.js', 'config.js', 'db.js', 'icon.svg', 'manifest.webmanifest',
   'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css',
   'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js',
 ];

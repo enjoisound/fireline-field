@@ -15,6 +15,18 @@ A simple, offline-first web app for wildland firefighters. It runs in any phone 
 
 Everything you collect is stored on the device (IndexedDB), so it works with no signal. The last downloaded NIFC layers are also kept for offline viewing. Long-press / right-click the map to read a coordinate.
 
+## Crew sign-in
+
+The app opens with a sign-in screen asking for name, crew/resource and a shared crew passcode. Each device stays signed in (so it opens offline), and the name is stamped on everything collected. Sign out is under **Data**.
+
+To change the passcode (this signs everyone out):
+
+```bash
+python set_passcode.py "new-passcode"
+```
+
+Then commit and push. Only a salted hash is stored in `config.js`. **This is a casual gate, not real security:** the site and its code are public, so a determined person can get past it. Don't put anything sensitive in the app on the strength of the passcode alone.
+
 ## Run it
 
 Service workers need a web server (not `file://`). From this folder:

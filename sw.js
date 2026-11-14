@@ -1,5 +1,5 @@
 // Service worker: makes the app open and the map draw with no signal.
-const SHELL = 'fireline-shell-v2';
+const SHELL = 'fireline-shell-v3';
 const TILES = 'fireline-tiles';
 const SHELL_FILES = [
   './', 'index.html', 'styles.css', 'app.js', 'config.js', 'db.js', 'icon.svg', 'manifest.webmanifest',
@@ -43,5 +43,5 @@ self.addEventListener('fetch', (e) => {
       const copy = r.clone(); caches.open(SHELL).then((c) => c.put(e.request, copy));
     }
     return r;
-  }).catch(() => caches.match(e.request).then((m) => m || caches.match('index.html'))));
+  }).catch(() => caches.match(e.request, { ignoreSearch: true }).then((m) => m || caches.match('index.html'))));
 });

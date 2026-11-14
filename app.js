@@ -859,7 +859,7 @@ function getSession() {
 function requireLogin() {
   return new Promise((resolve) => {
     const existing = getSession();
-    if (existing || !CFG.passHash) return resolve(existing);
+    if (existing) return resolve(existing);
     const box = $('#login'), form = $('#login-form'), err = $('#login-err');
     form.elements.name.value = localStorage.getItem('by') || '';
     box.classList.remove('hidden');

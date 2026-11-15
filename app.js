@@ -136,6 +136,8 @@ const $ = (s, r = document) => r.querySelector(s);
 const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 const fmtDate = (t) => (t ? new Date(t).toLocaleString() : '');
+// Give up on slow networks ("lie-fi") instead of hanging; callers fall back to saved data.
+const timeoutSignal = (ms) => { if (AbortSignal.timeout) return AbortSignal.timeout(ms); const c = new AbortController(); setTimeout(() => c.abort(), ms); return c.signal; };
 
 let toastT;
 function toast(msg, ms = 2500) {
@@ -222,7 +224,7 @@ function envParams(extra = {}) {
 
 async function fetchLayer(key, url, params) {
   try {
-    const r = await fetch(`${url}?${params}`);
+    const r = await fetch(`${url}?${params}`, { signal: timeoutSignal(15000) });
     if (!r.ok) throw new Error(r.status);
     const gj = await r.json();
     if (gj.error) throw new Error(gj.error.message);
@@ -357,23 +359,34 @@ async function getElevationFt(lat, lng) {
   const key = lat.toFixed(5) + ',' + lng.toFixed(5);
   if (elevCache.has(key)) return elevCache.get(key);
   try {
-    const r = await fetch(`https://epqs.nationalmap.gov/v1/json?x=${lng.toFixed(6)}&y=${lat.toFixed(6)}&units=Feet&wkid=4326&includeDate=false`);
+    const r = await fetch(`https://epqs.nationalmap.gov/v1/json?x=${lng.toFixed(6)}&y=${lat.toFixed(6)}&units=Feet&wkid=4326&includeDate=false`, { signal: timeoutSignal(25000) });
     const j = await r.json(); const v = parseFloat(j.value);
     if (!isFinite(v) || v < -1000) return null; // outside US coverage returns a no-data value
     elevCache.set(key, v); return v;
   } catch { return null; }
 }
 async function fillElevation(f) {
-  if (!navigator.onLine) return;
   const [lng, lat] = f.geometry.coordinates;
   const v = await getElevationFt(lat, lng);
   if (v == null) return;
   f.props.elevFt = v; f.props.elevSrc = 'USGS 3DEP';
   await DB.put('features', f);
 }
+// Points dropped with no signal get their elevation once coverage returns. Phones don't always
+// announce "back online" reliably, so this also retries every 2 minutes while anything is pending.
+let backfilling = false;
 async function backfillElevations() {
-  for (const f of S.features) if ((f.kind === 'point' || f.kind === 'triage') && f.props.elevFt == null) await fillElevation(f);
+  if (backfilling) return; backfilling = true;
+  try {
+    for (const f of S.features) {
+      if ((f.kind === 'point' || f.kind === 'triage') && f.props.elevFt == null) {
+        await fillElevation(f);
+        if (f.props.elevFt == null) break; // still no signal; try again later
+      }
+    }
+  } finally { backfilling = false; }
 }
+setInterval(backfillElevations, 120000);
 function ptButtons(lat, lng, name, elevFt) {
   return `<button class="btn" data-nav="${lat},${lng}" data-name="${esc(name)}" data-elev="${elevFt ?? ''}">${ICON.nav} Navigate</button>
     <button class="btn" data-copy="${lat},${lng}">${ICON.copy} Copy</button>`;

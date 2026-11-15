@@ -1,5 +1,5 @@
 // Service worker: makes the app open and the map draw with no signal.
-const SHELL = 'fireline-shell-v3';
+const SHELL = 'fireline-shell-v6';
 const TILES = 'fireline-tiles';
 const SHELL_FILES = [
   './', 'index.html', 'styles.css', 'app.js', 'config.js', 'db.js', 'icon.svg', 'manifest.webmanifest',

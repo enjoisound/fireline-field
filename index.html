@@ -3,25 +3,33 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="theme-color" content="#1b1410">
+  <meta name="theme-color" content="#0a0606">
   <title>FireLine Field</title>
   <link rel="manifest" href="manifest.webmanifest">
-  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="icon" href="icon.svg?v=6" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icon.svg?v=6">
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
-  <link rel="stylesheet" href="styles.css?v=3">
+  <link rel="stylesheet" href="styles.css?v=6">
 </head>
 <body>
   <header class="topbar">
-    <div class="brand"><img src="icon.svg" alt="" width="22" height="22"> FireLine Field</div>
+    <div class="brand"><img src="icon.svg?v=6" alt="" width="26" height="26"><span>FIRELINE<b>FIELD</b></span></div>
     <div class="status">
       <span id="net" class="pill">online</span>
       <span id="gps" class="pill off">GPS off</span>
+      <button id="night-btn" class="night-btn" aria-label="Red-light night mode" title="Red-light night mode"><span data-icon="night"></span></button>
     </div>
   </header>
 
   <div id="map"></div>
 
   <div id="coords" class="coords">—</div>
+
+  <!-- Navigate-to-waypoint readout -->
+  <div id="navbar" class="navbar hidden" role="status">
+    <div id="navinfo"></div>
+    <button id="nav-stop" class="nav-stop" aria-label="End navigation">END</button>
+  </div>
 
   <!-- Drawing / measuring bar -->
   <div id="drawbar" class="drawbar hidden">
@@ -35,12 +43,12 @@
   </div>
 
   <nav class="toolbar">
-    <button data-panel="layers"><span>🗺️</span>Layers</button>
-    <button data-panel="collect"><span>📍</span>Collect</button>
-    <button data-panel="triage"><span>🏠</span>Triage</button>
-    <button data-panel="tools"><span>📏</span>Tools</button>
-    <button data-panel="data"><span>💾</span>Data</button>
-    <button data-panel="intel"><span>🛰️</span>Intel</button>
+    <button data-panel="layers"><span data-icon="maps"></span>Maps</button>
+    <button data-panel="collect"><span data-icon="mark"></span>Mark</button>
+    <button data-panel="tools"><span data-icon="nav"></span>Nav</button>
+    <button data-panel="triage"><span data-icon="triage"></span>Triage</button>
+    <button data-panel="data"><span data-icon="data"></span>Data</button>
+    <button data-panel="intel"><span data-icon="intel"></span>Intel</button>
   </nav>
 
   <aside id="panel" class="panel hidden" aria-live="polite">
@@ -55,12 +63,12 @@
 
   <div id="login" class="login hidden">
     <form id="login-form" class="login-card" autocomplete="on">
-      <img src="icon.svg" alt="" width="56" height="56">
-      <h1>FireLine Field</h1>
+      <img src="icon.svg?v=6" alt="" width="64" height="64">
+      <h1>FIRELINE<b>FIELD</b></h1>
       <p class="hint">Crew sign-in</p>
       <label class="f">Your name<input name="name" required autocomplete="name" placeholder="J. Smith"></label>
       <label class="f">Crew / resource<input name="crew" required placeholder="E-341, Div A, Hotshots…"></label>
-      <label class="f">Crew passcode<input name="pass" type="password" required autocomplete="current-password"></label>
+      <label class="f">Crew passcode<input name="pass" type="password" required autocomplete="current-password" inputmode="numeric"></label>
       <div id="login-err" class="login-err hidden">Wrong passcode. Check with your crew boss.</div>
       <button class="btn primary block" type="submit">Sign in</button>
       <p class="hint small">You stay signed in on this device, so the app still opens with no signal.</p>
@@ -68,8 +76,8 @@
   </div>
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-  <script src="config.js?v=4"></script>
-  <script src="db.js?v=3"></script>
-  <script src="app.js?v=3"></script>
+  <script src="config.js?v=6"></script>
+  <script src="db.js?v=6"></script>
+  <script src="app.js?v=6"></script>
 </body>
 </html>

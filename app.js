@@ -5,6 +5,20 @@
 (() => {
 'use strict';
 
+// Custom line icons (stroke = currentColor) so the UI is ours, not emoji.
+const svg = (d) => `<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
+const ICON = {
+  maps: svg('<path d="M3 6l6-2 6 2 6-2v14l-6 2-6-2-6 2z"/><path d="M9 4v14M15 6v14"/>'),
+  mark: svg('<path d="M12 21s-7-6.2-7-11.5A7 7 0 0 1 19 9.5C19 14.8 12 21 12 21z"/><circle cx="12" cy="9.5" r="2.5"/>'),
+  nav: svg('<circle cx="12" cy="12" r="9"/><path d="M15.5 8.5l-2.2 4.8-4.8 2.2 2.2-4.8z"/>'),
+  triage: svg('<path d="M3 11l9-7 9 7"/><path d="M5 10v10h14V10"/><path d="M10 20v-5h4v5"/>'),
+  data: svg('<ellipse cx="12" cy="6" rx="8" ry="3"/><path d="M4 6v6c0 1.7 3.6 3 8 3s8-1.3 8-3V6"/><path d="M4 12v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"/>'),
+  intel: svg('<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/><circle cx="12" cy="12" r="7.5"/>'),
+  copy: svg('<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h8"/>'),
+  night: svg('<path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z"/>'),
+  pdf: svg('<path d="M6 2h9l5 5v15H6z"/><path d="M14 2v6h6"/><path d="M9 14h6M9 17h4"/>'),
+};
+
 // ---------------------------------------------------------------- config
 // Categories modeled on the National Incident Feature Service (NIFS) event layers.
 const POINT_CATS = [
@@ -83,10 +97,16 @@ const S = {
   me: null,               // last GPS fix {lat,lng,acc}
   draw: null,             // active drawing session
   incidentsData: null,
+  nav: null,              // active navigation target {lat,lng,name,elevFt}
+  maps: [],               // imported GeoPDF maps (metadata)
+  meGroundFt: null,
 };
 
 // ---------------------------------------------------------------- map
+const FLAME = '<svg viewBox="0 0 24 24" width="22" height="22"><path d="M12 2c1.2 4 6 6.4 6 11.6a6 6 0 0 1-12 0c0-3 1.8-4.8 3-6.6 0 2 .9 3.3 2.1 3.9C10.3 7 11.2 4.4 12 2z" fill="#ff3b30" stroke="#160403" stroke-width="1.2"/><path d="M12 12.5c.8 2 2.6 3.1 2.6 5.2a2.6 2.6 0 0 1-5.2 0c0-1.5 1.1-2.3 1.5-3.4.4 1.2.8 1.5 1.1 1.5z" fill="#ffd0c8"/></svg>';
+const fireIcon = L.divIcon({ className: 'fire-pin', html: FLAME, iconSize: [22, 22], iconAnchor: [11, 18] });
 const map = L.map('map', { zoomControl: true, attributionControl: true }).setView([39.5, -111.5], 5);
+map.createPane('geopdf').style.zIndex = 250; // above basemap tiles, below fire layers & markup
 BASEMAPS[S.basemap].addTo(map);
 L.control.scale({ imperial: true, metric: true }).addTo(map);
 
@@ -94,8 +114,9 @@ const G = {
   perimeters: L.geoJSON(null, { style: () => ({ color: '#ff2a1a', weight: 2, fillColor: '#ff2a1a', fillOpacity: 0.15 }),
     onEachFeature: (f, l) => l.bindPopup(() => nifcPopup(f.properties, 'perimeter')) }),
   incidents: L.geoJSON(null, {
-    pointToLayer: (f, ll) => L.marker(ll, { icon: L.divIcon({ className: 'fire-pin', html: '🔥', iconSize: [20, 20] }) }),
-    onEachFeature: (f, l) => l.bindPopup(() => nifcPopup(f.properties, 'incident')) }),
+    pointToLayer: (f, ll) => L.marker(ll, { icon: fireIcon }),
+    onEachFeature: (f, l) => l.bindPopup(() => { const [lng, lat] = f.geometry.coordinates;
+      return nifcPopup(f.properties, 'incident') + `<div class="btns">${ptButtons(lat, lng, f.properties.IncidentName || 'Incident')}</div>`; }) }),
   viirs: L.geoJSON(null, {
     pointToLayer: (f, ll) => L.circleMarker(ll, { radius: 4, color: '#ffd23f', weight: 1, fillColor: '#ff3b1a', fillOpacity: 0.9 }),
     onEachFeature: (f, l) => l.bindPopup(() => nifcPopup(f.properties, 'viirs')) }),
@@ -103,6 +124,8 @@ const G = {
   triage: L.layerGroup(),
   track: L.layerGroup(),
   draw: L.layerGroup().addTo(map),
+  nav: L.layerGroup().addTo(map),
+  maps: {},               // id -> GeoPDF layer
   me: L.layerGroup().addTo(map),
 };
 // stacking order: perimeters under everything
@@ -267,10 +290,16 @@ function featurePopup(f) {
   if (f.kind === 'line') add('Length', pathLen(toLL(f.geometry.coordinates)).toFixed(0) + ' m / ' + (pathLen(toLL(f.geometry.coordinates)) / 20.1168).toFixed(1) + ' ch');
   if (f.kind === 'polygon') add('Area', (area(toLL(f.geometry.coordinates[0])) / 4046.8564).toFixed(1) + ' ac');
   add('Label', p.label); add('Notes', p.notes); add('Collected', fmtDate(p.createdAt)); add('By', p.by);
-  if (f.kind === 'point' || f.kind === 'triage') { const [lng, lat] = f.geometry.coordinates; add('Location', ddm(lat, lng)); }
+  let ptBtns = '';
+  if (f.kind === 'point' || f.kind === 'triage') {
+    const [lng, lat] = f.geometry.coordinates;
+    add('Location', ddm(lat, lng));
+    add('Elevation', p.elevFt != null ? `${Math.round(p.elevFt).toLocaleString()} ft` : navigator.onLine ? 'looking up…' : 'pending (offline)');
+    ptBtns = ptButtons(lat, lng, p.label || p.address || f.category, p.elevFt);
+  }
   const photo = p.photo ? `<img src="${p.photo}" style="max-width:220px;border-radius:6px;margin-top:6px">` : '';
   return `<h4>${esc(f.category)}</h4><table>${rows.join('')}</table>${photo}
-    <div class="btns"><button class="btn" data-edit="${f.id}">Edit</button><button class="btn danger" data-del="${f.id}">Delete</button></div>`;
+    <div class="btns">${ptBtns}<button class="btn" data-edit="${f.id}">Edit</button><button class="btn danger" data-del="${f.id}">Delete</button></div>`;
 }
 
 function renderMine() {
@@ -295,7 +324,14 @@ function renderMine() {
 
 document.addEventListener('click', async (e) => {
   const del = e.target.closest('[data-del]'); const ed = e.target.closest('[data-edit]');
-  if (del) {
+  const nav = e.target.closest('[data-nav]'); const cp = e.target.closest('[data-copy]');
+  if (nav) {
+    const [lat, lng] = nav.dataset.nav.split(',').map(Number);
+    map.closePopup(); startNav({ lat, lng, name: nav.dataset.name || 'Waypoint', elevFt: nav.dataset.elev ? +nav.dataset.elev : null });
+  } else if (cp) {
+    const [lat, lng] = cp.dataset.copy.split(',').map(Number);
+    copyText(`${ddm(lat, lng)}  (${lat.toFixed(5)}, ${lng.toFixed(5)})`);
+  } else if (del) {
     if (!confirm('Delete this feature?')) return;
     await DB.del('features', del.dataset.del);
     S.features = S.features.filter((f) => f.id !== del.dataset.del);
@@ -312,6 +348,35 @@ async function saveFeature(f) {
   const i = S.features.findIndex((x) => x.id === f.id);
   if (i >= 0) S.features[i] = f; else S.features.push(f);
   renderMine();
+  if ((f.kind === 'point' || f.kind === 'triage') && f.props.elevFt == null) fillElevation(f);
+}
+
+// ---------------------------------------------------------------- elevation (USGS 3DEP, public domain)
+const elevCache = new Map();
+async function getElevationFt(lat, lng) {
+  const key = lat.toFixed(5) + ',' + lng.toFixed(5);
+  if (elevCache.has(key)) return elevCache.get(key);
+  try {
+    const r = await fetch(`https://epqs.nationalmap.gov/v1/json?x=${lng.toFixed(6)}&y=${lat.toFixed(6)}&units=Feet&wkid=4326&includeDate=false`);
+    const j = await r.json(); const v = parseFloat(j.value);
+    if (!isFinite(v) || v < -1000) return null; // outside US coverage returns a no-data value
+    elevCache.set(key, v); return v;
+  } catch { return null; }
+}
+async function fillElevation(f) {
+  if (!navigator.onLine) return;
+  const [lng, lat] = f.geometry.coordinates;
+  const v = await getElevationFt(lat, lng);
+  if (v == null) return;
+  f.props.elevFt = v; f.props.elevSrc = 'USGS 3DEP';
+  await DB.put('features', f);
+}
+async function backfillElevations() {
+  for (const f of S.features) if ((f.kind === 'point' || f.kind === 'triage') && f.props.elevFt == null) await fillElevation(f);
+}
+function ptButtons(lat, lng, name, elevFt) {
+  return `<button class="btn" data-nav="${lat},${lng}" data-name="${esc(name)}" data-elev="${elevFt ?? ''}">${ICON.nav} Navigate</button>
+    <button class="btn" data-copy="${lat},${lng}">${ICON.copy} Copy</button>`;
 }
 
 // ---------------------------------------------------------------- drawing
@@ -349,6 +414,7 @@ function updateDraw() {
   else {
     const len = pathLen(isArea && d.pts.length > 2 ? [...d.pts, d.pts[0]] : d.pts);
     info = `${d.kind.startsWith('measure') ? 'Measuring' : esc(d.category)} · ${d.pts.length} pts<br>${isArea ? 'Perimeter' : 'Length'}: ${fmtLen(len)}`;
+    if (!isArea && d.pts.length > 1) { const b = bearing(d.pts[d.pts.length - 2], d.pts[d.pts.length - 1]); info += `<br>Last leg bearing: <b>${Math.round(b)}°</b> T ${card(b)}`; }
     if (isArea) info += `<br>Area: ${fmtArea(area(d.pts))}`;
   }
   $('#drawinfo').innerHTML = info;
@@ -382,10 +448,10 @@ $('#d-gps').onclick = () => {
 
 // ---------------------------------------------------------------- panels
 const PANELS = {
-  layers: { title: 'Layers', render: renderLayers },
+  layers: { title: 'Maps & layers', render: renderLayers },
   collect: { title: 'Collect data', render: renderCollect },
   triage: { title: 'Structure triage', render: renderTriage },
-  tools: { title: 'Tools', render: renderTools },
+  tools: { title: 'Navigate & measure', render: renderTools },
   data: { title: 'My data & offline', render: renderData },
   intel: { title: 'Fire intel & resources', render: renderIntel },
 };
@@ -421,8 +487,20 @@ function renderLayers(el) {
   const layerRow = (key, name, sub, sw) => `<label class="row"><input type="checkbox" data-layer="${key}" ${S.layersOn[key] ? 'checked' : ''}>
     ${sw}<span class="grow">${name}<small>${sub}</small></span></label>`;
   el.append(h(`
+    <h3>Incident maps (GeoPDF)</h3>
+    <p class="hint">Import the GeoPDF maps from your IAP. They're stored on this phone, work offline, and show your GPS position and markup on top.</p>
+    <label class="btn primary block">${ICON.pdf} Import GeoPDF<input type="file" id="gp-file" accept="application/pdf,.pdf" hidden></label>
+    <div id="gp-prog" class="hint"></div>
+    <div id="gp-list">${S.maps.map((m) => `
+      <div class="row maprow">
+        <input type="checkbox" data-gp-on="${m.id}" ${m.on ? 'checked' : ''} aria-label="Show map">
+        <span class="grow">${esc(m.name)}<small>${fmtDate(m.createdAt)}${m.fitErrM != null ? ` · fit ±${Math.max(1, Math.round(m.fitErrM * 3.28084))} ft` : ''}</small>
+          <input type="range" min="0.2" max="1" step="0.05" value="${m.opacity}" data-gp-op="${m.id}" aria-label="Opacity"></span>
+        <button class="btn" data-gp-zoom="${m.id}">Zoom</button>
+        <button class="btn danger" data-gp-del="${m.id}" aria-label="Delete map">✕</button>
+      </div>`).join('') || '<p class="hint">No maps imported yet.</p>'}</div>
     <h3>NIFC live layers (public)</h3>
-    ${layerRow('incidents', 'Current incidents', 'WFIGS incident locations (IRWIN)', '<span class="fire-pin">🔥</span>')}
+    ${layerRow('incidents', 'Current incidents', 'WFIGS incident locations (IRWIN)', `<span class="fire-pin">${FLAME}</span>`)}
     ${layerRow('perimeters', 'Current fire perimeters', 'WFIGS interagency perimeters', '<span class="swatch" style="background:#ff2a1a55;border-color:#ff2a1a"></span>')}
     ${layerRow('viirs', 'VIIRS / MODIS hotspots (48 h)', 'Satellite thermal detections · zoom in to see', '<span class="swatch dot" style="background:#ff3b1a"></span>')}
     <h3>My data</h3>
@@ -444,6 +522,11 @@ function renderLayers(el) {
     if (k === 'viirs' && cb.checked && map.getZoom() < 6) toast('Zoom in (level 6+) to load hotspots');
   }));
   el.querySelectorAll('[name=bm]').forEach((r) => (r.onchange = () => setBasemap(r.value)));
+  $('#gp-file', el).onchange = (e) => importGeoPdf(e.target.files[0]);
+  el.querySelectorAll('[data-gp-on]').forEach((cb) => (cb.onchange = () => setMapOn(cb.dataset.gpOn, cb.checked)));
+  el.querySelectorAll('[data-gp-op]').forEach((r) => (r.oninput = () => setMapOpacity(r.dataset.gpOp, +r.value)));
+  el.querySelectorAll('[data-gp-zoom]').forEach((b) => (b.onclick = () => { const l = G.maps[b.dataset.gpZoom]; if (l) { closePanel(); map.fitBounds(l.getBounds()); } }));
+  el.querySelectorAll('[data-gp-del]').forEach((b) => (b.onclick = () => deleteMap(b.dataset.gpDel)));
 }
 function setBasemap(name) {
   map.removeLayer(BASEMAPS[S.basemap]); S.basemap = name; BASEMAPS[name].addTo(map); BASEMAPS[name].bringToBack(); saveSettings();
@@ -564,43 +647,56 @@ function zoomToFeature(id) {
   const lyr = L.geoJSON(f.geometry); map.fitBounds(lyr.getBounds(), { maxZoom: 17 });
 }
 
-// ---- Tools
+// ---- Navigate & measure
 function renderTools(el) {
+  const decl = getDecl();
   el.append(h(`
-    <h3>Location</h3>
+    <h3>Navigate to waypoint</h3>
+    ${S.nav ? `<div class="row"><span class="grow">Navigating to <b>${esc(S.nav.name)}</b></span><button class="btn danger" id="t-navstop">End</button></div>` : ''}
+    <p class="hint">Tap any marker or incident and choose <b>Navigate</b>, or enter coordinates below. Shows distance, bearing and elevation change from where you are.</p>
+    <input class="search" id="t-coord" placeholder="39.5123, -111.4321  or  39 30.738 N 111 25.926 W">
+    <div class="btns"><button class="btn primary" id="t-nav">${ICON.nav} Navigate</button><button class="btn" id="t-go">Show on map</button></div>
+    <label class="f">Magnetic declination (° east +, west −)<input id="t-decl" type="number" step="0.5" value="${decl || ''}" placeholder="e.g. 11 in Idaho, -8 in North Carolina"></label>
+    <p class="hint">Set it to also see magnetic bearings for your compass. Leave blank for true bearings only.</p>
+    <h3>My location</h3>
     <div class="btns">
       <button class="btn ${S.watchId != null ? 'primary' : ''}" id="t-gps">${S.watchId != null ? 'GPS on' : 'Turn on GPS'}</button>
       <button class="btn" id="t-center">Center on me</button>
+      <button class="btn" id="t-copyme">${ICON.copy} Copy</button>
     </div>
     <div id="t-fix" class="hint" style="margin-top:8px">${S.me ? fixText() : 'No fix yet.'}</div>
+    <h3>Measure</h3>
+    <div class="btns">
+      <button class="btn" id="t-mline">Distance & bearing</button>
+      <button class="btn" id="t-marea">Area</button>
+      <button class="btn" id="t-mclear">Clear</button>
+    </div>
     <h3>Track / breadcrumbs</h3>
     <p class="hint">Records your path for crew accountability and to map line as you walk it.</p>
     <div class="btns">
       <button class="btn ${S.tracking ? 'primary' : ''}" id="t-track">${S.tracking ? '■ Stop tracking' : '● Start tracking'}</button>
       <button class="btn" id="t-track2line">Save track as line…</button>
     </div>
-    <div class="hint" id="t-trackinfo">${trackInfo()}</div>
-    <h3>Measure</h3>
-    <div class="btns">
-      <button class="btn" id="t-mline">Distance</button>
-      <button class="btn" id="t-marea">Area</button>
-      <button class="btn" id="t-mclear">Clear</button>
-    </div>
-    <h3>Go to coordinates</h3>
-    <input class="search" id="t-coord" placeholder="39.5123, -111.4321  or  39 30.738 N 111 25.926 W">
-    <button class="btn block" id="t-go">Go</button>`));
+    <div class="hint" id="t-trackinfo">${trackInfo()}</div>`));
+  const navStop = $('#t-navstop', el); if (navStop) navStop.onclick = () => { stopNav(); openKey = null; openPanel('tools'); };
+  $('#t-decl', el).onchange = (e) => { localStorage.setItem('decl', e.target.value || '0'); updateNav(); };
   $('#t-gps', el).onclick = () => { S.watchId != null ? stopGps() : startGps(); openKey = null; openPanel('tools'); };
   $('#t-center', el).onclick = () => { if (S.me) map.setView(S.me, Math.max(map.getZoom(), 15)); else { startGps(); toast('Getting a fix…'); } };
+  $('#t-copyme', el).onclick = () => (S.me ? copyText(`${ddm(S.me.lat, S.me.lng)}  (${S.me.lat.toFixed(5)}, ${S.me.lng.toFixed(5)})`) : toast('No GPS fix yet'));
   $('#t-track', el).onclick = () => { S.tracking ? stopTracking() : startTracking(); openKey = null; openPanel('tools'); };
   $('#t-track2line', el).onclick = trackToLine;
   $('#t-mline', el).onclick = () => startDraw('measure-line', 'Measure', () => {});
   $('#t-marea', el).onclick = () => startDraw('measure-area', 'Measure', () => {});
   $('#t-mclear', el).onclick = () => { cancelDraw(); toast('Cleared'); };
+  $('#t-nav', el).onclick = () => {
+    const ll = parseCoord($('#t-coord', el).value);
+    if (!ll) return toast('Could not read those coordinates');
+    startNav({ lat: ll[0], lng: ll[1], name: ddm(ll[0], ll[1]), elevFt: null });
+  };
   $('#t-go', el).onclick = () => {
     const ll = parseCoord($('#t-coord', el).value);
     if (!ll) return toast('Could not read those coordinates');
-    closePanel(); map.setView(ll, 15);
-    L.popup().setLatLng(ll).setContent(`<h4>Coordinate</h4>${ddm(ll[0], ll[1])}<br>${ll[0].toFixed(5)}, ${ll[1].toFixed(5)}`).openOn(map);
+    closePanel(); map.setView(ll, 15); locationPopup(L.latLng(ll[0], ll[1]));
   };
 }
 
@@ -616,7 +712,20 @@ function parseCoord(s) {
 }
 
 // ---------------------------------------------------------------- GPS & tracking
-function fixText() { return `${ddm(S.me.lat, S.me.lng)}<br>±${Math.round(S.me.acc * 3.28084)} ft${S.me.alt != null ? ` · elev ${Math.round(S.me.alt * 3.28084)} ft` : ''}`; }
+function fixText() {
+  const parts = [`±${Math.round(S.me.acc * 3.28084)} ft accuracy`];
+  if (S.meGroundFt != null) parts.push(`<b>${Math.round(S.meGroundFt).toLocaleString()} ft</b> elevation (USGS)`);
+  if (S.me.alt != null) parts.push(`GPS altitude ${Math.round(S.me.alt * 3.28084).toLocaleString()} ft`);
+  return `${ddm(S.me.lat, S.me.lng)}<br>${parts.join(' · ')}`;
+}
+let lastGroundAt = 0, lastGroundPos = null;
+async function refreshGround() {
+  if (!S.me || !navigator.onLine) return;
+  if (Date.now() - lastGroundAt < 30000 || (lastGroundPos && dist(lastGroundPos, S.me) < 30)) return;
+  lastGroundAt = Date.now(); lastGroundPos = { lat: S.me.lat, lng: S.me.lng };
+  const v = await getElevationFt(S.me.lat, S.me.lng);
+  if (v != null) { S.meGroundFt = v; const fx = $('#t-fix'); if (fx) fx.innerHTML = fixText(); updateNav(); }
+}
 function trackInfo() {
   if (!S.track || !S.track.points.length) return 'No track recorded.';
   const pts = S.track.points.map(([lat, lng]) => ({ lat, lng }));
@@ -646,6 +755,7 @@ function onFix(pos) {
   L.marker([lat, lng], { icon: L.divIcon({ className: 'me-dot', iconSize: [16, 16] }), interactive: false }).addTo(G.me);
   if (firstFix) { firstFix = false; map.setView([lat, lng], Math.max(map.getZoom(), 14)); }
   const fx = $('#t-fix'); if (fx) fx.innerHTML = fixText();
+  refreshGround(); updateNav();
   if (S.tracking && acc < 50) {
     const last = S.track.points[S.track.points.length - 1];
     if (!last || dist({ lat: last[0], lng: last[1] }, S.me) > 5) {
@@ -692,12 +802,18 @@ function renderData(el) {
     <div class="row"><span class="grow">Polygons</span><b>${n('polygon')}</b></div>
     <div class="row"><span class="grow">Structure assessments</span><b>${n('triage')}</b></div>
     <h3>Share & export</h3>
-    <p class="hint">GeoJSON opens in ArcGIS Online / Pro, Field Maps (via AGOL), QGIS, Avenza and CalTopo. Upload to your incident's NIFS map to share with the team.</p>
+    <label class="f">What to export<select id="x-what">${exportChoices().map(([v, t]) => `<option value="${esc(v)}">${esc(t)}</option>`).join('')}</select></label>
+    <label class="f">Format<select id="x-fmt">
+      <option value="kml">KML: Google Earth, Avenza, Gaia, CalTopo, ArcGIS</option>
+      <option value="gpx">GPX: handheld GPS units (waypoints & tracks)</option>
+      <option value="geojson">GeoJSON: ArcGIS Online/Pro, QGIS, NIFS upload</option>
+      <option value="csv">CSV: spreadsheet of points & triage</option>
+    </select></label>
+    <div class="radios" style="margin-top:8px"><label><input type="checkbox" id="x-trk" ${S.track?.points.length > 1 ? 'checked' : ''}> Include my GPS track (KML/GPX)</label></div>
     <div class="btns">
-      <button class="btn primary" id="x-geo">Export GeoJSON</button>
-      <button class="btn" id="x-csv">Triage CSV</button>
+      <button class="btn primary" id="x-dl">Download</button>
       <button class="btn" id="x-share">Share…</button>
-      <label class="btn">Import<input type="file" id="x-imp" accept=".geojson,.json,application/geo+json" hidden></label>
+      <label class="btn">Import GeoJSON<input type="file" id="x-imp" accept=".geojson,.json,application/geo+json" hidden></label>
     </div>
     <h3>Offline maps</h3>
     <p class="hint">Downloads basemap tiles for the area on screen (this zoom + 3 more levels) so the map works with no signal. Last-loaded NIFC layers are also kept for offline viewing.</p>
@@ -708,9 +824,19 @@ function renderData(el) {
       <button class="btn" id="x-out">Sign out</button></div>
     <h3>Danger zone</h3>
     <button class="btn danger" id="x-wipe">Delete all my data</button>`));
-  $('#x-geo', el).onclick = () => download(`fireline-${stamp()}.geojson`, JSON.stringify(toGeoJSON(), null, 1), 'application/geo+json');
-  $('#x-csv', el).onclick = () => download(`structure-triage-${stamp()}.csv`, triageCsv(), 'text/csv');
-  $('#x-share', el).onclick = shareData;
+  const pickExport = () => {
+    const x = buildExport($('#x-fmt', el).value, $('#x-what', el).value, $('#x-trk', el).checked);
+    if (!x.n && !($('#x-trk', el).checked && S.track?.points.length > 1)) { toast('Nothing to export for that selection'); return null; }
+    return x;
+  };
+  $('#x-dl', el).onclick = () => { const x = pickExport(); if (x) { download(x.name, x.text, x.type); toast(`Exported ${x.n} features`); } };
+  $('#x-share', el).onclick = async () => {
+    const x = pickExport(); if (!x) return;
+    const file = new File([x.text], x.name, { type: x.type });
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      try { await navigator.share({ files: [file], title: 'FireLine field data' }); } catch { /* cancelled */ }
+    } else { download(x.name, x.text, x.type); toast('Sharing not supported here, so it was downloaded instead'); }
+  };
   $('#x-imp', el).onchange = importFile;
   $('#x-tiles', el).onclick = downloadTiles;
   $('#x-out', el).onclick = signOut;
@@ -726,25 +852,9 @@ function toGeoJSON() {
     properties: { FeatureCategory: f.category, Kind: f.kind, ...Object.fromEntries(Object.entries(f.props).map(([k, v]) => [k, Array.isArray(v) ? v.join('; ') : v])),
       CreateDate: f.props.createdAt ? new Date(f.props.createdAt).toISOString() : null } })) };
 }
-function triageCsv() {
-  const cols = ['address', 'category', 'status', 'structureType', 'roof', 'space', 'access', 'water', 'hazards', 'residents', 'notes', 'by', 'lat', 'lon', 'ddm', 'createdAt'];
-  const q = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
-  const rows = S.features.filter((f) => f.kind === 'triage').map((f) => {
-    const [lng, lat] = f.geometry.coordinates; const p = f.props;
-    return [p.address, f.category, p.status, p.structureType, p.roof, p.space, p.access, p.water, (p.hazards || []).join('; '), p.residents, p.notes, p.by,
-      lat, lng, ddm(lat, lng), fmtDate(p.createdAt)].map(q).join(',');
-  });
-  return [cols.join(','), ...rows].join('\n');
-}
 function download(name, text, type) {
   const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([text], { type })); a.download = name;
   document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
-}
-async function shareData() {
-  const file = new File([JSON.stringify(toGeoJSON())], `fireline-${stamp()}.geojson`, { type: 'application/geo+json' });
-  if (navigator.canShare && navigator.canShare({ files: [file] })) {
-    try { await navigator.share({ files: [file], title: 'FireLine field data' }); } catch { /* cancelled */ }
-  } else { toast('Sharing not supported here — use Export instead'); }
 }
 async function importFile(e) {
   const file = e.target.files[0]; if (!file) return;
@@ -818,7 +928,7 @@ function renderIntel(el) {
     const feats = (S.incidentsData?.gj.features || []).filter((f) => (f.properties.IncidentName || '').toLowerCase().includes(s)).slice(0, 25);
     if (!feats.length) { res.innerHTML = `<p class="hint">${S.incidentsData ? 'No match.' : 'Incident layer not loaded yet.'}</p>`; return; }
     feats.forEach((f) => {
-      const p = f.properties, r = h(`<div class="row" style="cursor:pointer"><span class="fire-pin">🔥</span><span class="grow">${esc(p.IncidentName)}
+      const p = f.properties, r = h(`<div class="row" style="cursor:pointer"><span class="fire-pin">${FLAME}</span><span class="grow">${esc(p.IncidentName)}
         <small>${esc(p.POOState || '')} · ${p.IncidentSize != null ? esc(p.IncidentSize) + ' ac' : 'size n/a'}${p.PercentContained != null ? ' · ' + p.PercentContained + '% contained' : ''}</small></span></div>`).firstElementChild;
       r.onclick = () => { const [lng, lat] = f.geometry.coordinates; closePanel(); map.setView([lat, lng], 12);
         L.popup().setLatLng([lat, lng]).setContent(nifcPopup(p, 'incident')).openOn(map); };
@@ -827,15 +937,340 @@ function renderIntel(el) {
   };
 }
 
+// ---------------------------------------------------------------- copy coordinates
+async function copyText(text) {
+  try { await navigator.clipboard.writeText(text); toast('Copied: ' + text, 3000); }
+  catch {
+    const ta = document.createElement('textarea'); ta.value = text; document.body.appendChild(ta); ta.select();
+    try { document.execCommand('copy'); toast('Copied: ' + text, 3000); } catch { prompt('Copy these coordinates:', text); }
+    ta.remove();
+  }
+}
+
+// ---------------------------------------------------------------- navigate to waypoint
+function bearing(a, b) {
+  const y = Math.sin(rad(b.lng - a.lng)) * Math.cos(rad(b.lat));
+  const x = Math.cos(rad(a.lat)) * Math.sin(rad(b.lat)) - Math.sin(rad(a.lat)) * Math.cos(rad(b.lat)) * Math.cos(rad(b.lng - a.lng));
+  return ((Math.atan2(y, x) * 180) / Math.PI + 360) % 360;
+}
+const CARD = ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE', 'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW'];
+const card = (d) => CARD[Math.round(d / 22.5) % 16];
+function getDecl() { return parseFloat(localStorage.getItem('decl') || '0') || 0; }
+function fmtDistBig(m) {
+  const ft = m * 3.28084;
+  return ft < 1320 ? `${Math.round(ft).toLocaleString()} ft` : `${(m / 1609.344).toFixed(2)} mi`;
+}
+const targetIcon = L.divIcon({ className: '', iconSize: [34, 34], iconAnchor: [17, 17],
+  html: '<div class="nav-target"><span></span></div>' });
+
+function startNav(t) {
+  S.nav = t; closePanel(); startGps();
+  $('#navbar').classList.remove('hidden');
+  if (t.elevFt == null) getElevationFt(t.lat, t.lng).then((v) => { if (S.nav === t && v != null) { t.elevFt = v; updateNav(); } });
+  updateNav();
+  map.fitBounds(L.latLngBounds([t, S.me || t]).pad(0.35), { maxZoom: 16 });
+}
+function stopNav() { S.nav = null; G.nav.clearLayers(); $('#navbar').classList.add('hidden'); }
+let arrived = false;
+function updateNav() {
+  const t = S.nav; if (!t) return;
+  G.nav.clearLayers();
+  L.marker(t, { icon: targetIcon, interactive: false }).addTo(G.nav);
+  let html = `<div class="nav-name">${esc(t.name)}</div>`;
+  if (!S.me) {
+    html += `<div class="nav-big">Waiting for GPS…</div>`;
+  } else {
+    const d = dist(S.me, t), brg = bearing(S.me, t), decl = getDecl();
+    L.polyline([S.me, t], { color: '#ff3b30', weight: 3, dashArray: '2 8', lineCap: 'round', interactive: false }).addTo(G.nav);
+    const myElev = S.meGroundFt ?? (S.me.alt != null ? S.me.alt * 3.28084 : null);
+    let elev = t.elevFt != null ? `Target ${Math.round(t.elevFt).toLocaleString()} ft` : 'Target elev —';
+    if (t.elevFt != null && myElev != null) {
+      const dz = t.elevFt - myElev;
+      elev = `${dz >= 0 ? '▲' : '▼'} ${Math.abs(Math.round(dz)).toLocaleString()} ft ${dz >= 0 ? 'climb' : 'descent'}`;
+    }
+    const grade = t.elevFt != null && myElev != null && d > 30 ? ` · ${Math.round(((t.elevFt - myElev) / (d * 3.28084)) * 100)}% avg slope` : '';
+    html += `<div class="nav-main">
+        <div class="nav-arrow" style="transform:rotate(${brg}deg)">${svg('<path d="M12 3l6 17-6-4-6 4z" fill="currentColor"/>')}</div>
+        <div><div class="nav-big">${fmtDistBig(d)}</div><div class="nav-sub">${(d / 20.1168).toFixed(0)} chains</div></div>
+        <div class="nav-brg"><div class="nav-big">${Math.round(brg)}°<small>T</small></div>
+          <div class="nav-sub">${card(brg)}${decl ? ` · ${Math.round((brg - decl + 360) % 360)}° M` : ''}</div></div>
+      </div>
+      <div class="nav-sub">${elev}${grade}</div>`;
+    if (d < 15 && !arrived) { arrived = true; toast(`Arrived at ${t.name}`, 4000); navigator.vibrate?.(300); }
+    if (d > 30) arrived = false;
+  }
+  $('#navinfo').innerHTML = html;
+}
+$('#nav-stop').onclick = stopNav;
+
+// ---------------------------------------------------------------- GeoPDF incident maps
+// Reads the ISO 32000 geospatial dictionaries (/VP → /Measure /GEO with GPTS/LPTS) that
+// ArcGIS and most IAP map tools write, renders the page once, and pins it to the map.
+const LIBS = {
+  pdfjs: 'https://unpkg.com/pdfjs-dist@3.11.174/build/pdf.min.js',
+  pdfjsWorker: 'https://unpkg.com/pdfjs-dist@3.11.174/build/pdf.worker.min.js',
+  pdflib: 'https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js',
+};
+function loadScript(src) {
+  return new Promise((resolve, reject) => {
+    if (document.querySelector(`script[src="${src}"]`)) return resolve();
+    const el = document.createElement('script'); el.src = src; el.onload = resolve;
+    el.onerror = () => reject(new Error('Could not load the PDF reader. Connect once to enable GeoPDF import.'));
+    document.head.appendChild(el);
+  });
+}
+
+// Image pinned to the map by three corners (affine), so rotated / projected maps line up.
+const AffineImage = L.Layer.extend({
+  options: { pane: 'geopdf', opacity: 0.9 },
+  initialize(url, corners, opts) { this._url = url; this._c = corners.map((c) => L.latLng(c)); L.setOptions(this, opts); },
+  onAdd() {
+    const img = (this._img = L.DomUtil.create('img', 'geopdf-img leaflet-zoom-hide'));
+    img.style.opacity = this.options.opacity;
+    img.onload = () => this._reset();
+    img.src = this._url;
+    this.getPane().appendChild(img);
+    this._map.on('zoomend viewreset', this._reset, this);
+    this._reset();
+  },
+  onRemove() { this._img.remove(); this._map.off('zoomend viewreset', this._reset, this); },
+  setOpacity(o) { this.options.opacity = o; if (this._img) this._img.style.opacity = o; },
+  getBounds() {
+    const [tl, tr, bl] = this._c;
+    const br = L.latLng(tr.lat + bl.lat - tl.lat, tr.lng + bl.lng - tl.lng);
+    return L.latLngBounds([tl, tr, bl, br]);
+  },
+  _reset() {
+    const img = this._img; if (!img || !img.naturalWidth || !this._map) return;
+    const [tl, tr, bl] = this._c.map((c) => this._map.latLngToLayerPoint(c));
+    const w = img.naturalWidth, hgt = img.naturalHeight;
+    img.style.width = w + 'px'; img.style.height = hgt + 'px';
+    img.style.transform = `matrix(${(tr.x - tl.x) / w},${(tr.y - tl.y) / w},${(bl.x - tl.x) / hgt},${(bl.y - tl.y) / hgt},${tl.x},${tl.y})`;
+  },
+});
+
+function solve3(A, b) { // Cramer's rule for 3x3
+  const det = (m) => m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1]) - m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0]) + m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0]);
+  const D = det(A); if (Math.abs(D) < 1e-12) throw new Error('Map georeference points are degenerate');
+  return [0, 1, 2].map((i) => det(A.map((row, r) => row.map((v, c) => (c === i ? b[r] : v)))) / D);
+}
+function fitAffine(src, dst) { // least squares: dst = [a b c; d e f] * [x y 1]
+  const A = [[0, 0, 0], [0, 0, 0], [0, 0, 0]], bx = [0, 0, 0], by = [0, 0, 0];
+  src.forEach(([x, y], i) => {
+    const v = [x, y, 1];
+    for (let r = 0; r < 3; r++) { for (let c = 0; c < 3; c++) A[r][c] += v[r] * v[c]; bx[r] += v[r] * dst[i][0]; by[r] += v[r] * dst[i][1]; }
+  });
+  const X = solve3(A, bx), Y = solve3(A, by);
+  return (x, y) => [X[0] * x + X[1] * y + X[2], Y[0] * x + Y[1] * y + Y[2]];
+}
+
+async function readGeoref(bytes) {
+  const { PDFDocument, PDFName, PDFArray, PDFDict, PDFNumber } = window.PDFLib;
+  const doc = await PDFDocument.load(bytes, { ignoreEncryption: true, updateMetadata: false });
+  const page = doc.getPage(0);
+  const look = (o) => (o ? doc.context.lookup(o) : undefined);
+  const nums = (o) => { o = look(o); return o instanceof PDFArray ? o.asArray().map((x) => { x = look(x); return x instanceof PDFNumber ? x.asNumber() : NaN; }) : null; };
+  const vps = look(page.node.get(PDFName.of('VP')));
+  const cands = [];
+  if (vps instanceof PDFArray) {
+    for (const ref of vps.asArray()) {
+      const vp = look(ref); if (!(vp instanceof PDFDict)) continue;
+      const m = look(vp.get(PDFName.of('Measure'))); if (!(m instanceof PDFDict)) continue;
+      const sub = look(m.get(PDFName.of('Subtype')));
+      if (sub && sub.toString() !== '/GEO') continue;
+      const bbox = nums(vp.get(PDFName.of('BBox'))), gpts = nums(m.get(PDFName.of('GPTS')));
+      const lpts = nums(m.get(PDFName.of('LPTS'))) || [0, 1, 0, 0, 1, 0, 1, 1];
+      if (!bbox || !gpts || gpts.length < 6 || gpts.some(isNaN)) continue;
+      cands.push({ bbox, gpts, lpts, area: Math.abs((bbox[2] - bbox[0]) * (bbox[3] - bbox[1])) });
+    }
+  }
+  if (!cands.length) {
+    if (page.node.get(PDFName.of('LGIDict'))) throw new Error('This is an older TerraGo-style GeoPDF. Re-export it from ArcGIS or the IAP as an ISO/OGC GeoPDF.');
+    throw new Error('No georeference found in this PDF — is it a GeoPDF?');
+  }
+  const vp = cands.sort((a, b) => b.area - a.area)[0];
+  const [bx0, by0, bx1, by1] = [Math.min(vp.bbox[0], vp.bbox[2]), Math.min(vp.bbox[1], vp.bbox[3]), Math.max(vp.bbox[0], vp.bbox[2]), Math.max(vp.bbox[1], vp.bbox[3])];
+  const src = [], dst = [];
+  for (let i = 0; i * 2 + 1 < vp.gpts.length; i++) {
+    const lat = vp.gpts[2 * i], lng = vp.gpts[2 * i + 1];
+    const lx = vp.lpts[2 * i] ?? 0, ly = vp.lpts[2 * i + 1] ?? 0;
+    src.push([bx0 + lx * (bx1 - bx0), by0 + ly * (by1 - by0)]);
+    const pm = L.CRS.EPSG3857.project(L.latLng(lat, lng)); dst.push([pm.x, pm.y]);
+  }
+  const f = fitAffine(src, dst);
+  const fitErrM = Math.max(...src.map(([x, y], i) => { const [X, Y] = f(x, y); return Math.hypot(X - dst[i][0], Y - dst[i][1]); }))
+    * Math.cos(rad(vp.gpts[0])); // mercator meters → ground meters
+  const mb = page.getMediaBox();
+  const toLL = (x, y) => { const [X, Y] = f(x, y); const ll = L.CRS.EPSG3857.unproject(L.point(X, Y)); return [ll.lat, ll.lng]; };
+  return {
+    corners: [toLL(mb.x, mb.y + mb.height), toLL(mb.x + mb.width, mb.y + mb.height), toLL(mb.x, mb.y)], // TL, TR, BL
+    fitErrM,
+  };
+}
+
+async function renderPdfImage(bytes) {
+  const pdfjs = window.pdfjsLib; pdfjs.GlobalWorkerOptions.workerSrc = LIBS.pdfjsWorker;
+  const pdf = await pdfjs.getDocument({ data: bytes }).promise;
+  const page = await pdf.getPage(1);
+  const base = page.getViewport({ scale: 1, rotation: 0 }); // unrotated, to match PDF user space
+  const maxDim = 4000, maxArea = 15e6;
+  const scale = Math.min(4, maxDim / Math.max(base.width, base.height), Math.sqrt(maxArea / (base.width * base.height)));
+  const vp = page.getViewport({ scale, rotation: 0 });
+  const canvas = document.createElement('canvas'); canvas.width = Math.floor(vp.width); canvas.height = Math.floor(vp.height);
+  const ctx = canvas.getContext('2d'); ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+  await page.render({ canvasContext: ctx, viewport: vp }).promise;
+  const blob = await new Promise((res) => canvas.toBlob(res, 'image/jpeg', 0.85));
+  pdf.destroy(); canvas.width = canvas.height = 0;
+  return blob;
+}
+
+async function importGeoPdf(file) {
+  if (!file) return;
+  const prog = (t) => { const p = $('#gp-prog'); if (p) p.textContent = t; };
+  try {
+    prog('Loading PDF reader…');
+    await Promise.all([loadScript(LIBS.pdfjs), loadScript(LIBS.pdflib)]);
+    const buf = new Uint8Array(await file.arrayBuffer());
+    prog('Reading georeference…');
+    const geo = await readGeoref(buf.slice());
+    prog('Rendering map (large maps take a few seconds)…');
+    const blob = await renderPdfImage(buf.slice());
+    const m = { id: uid(), name: file.name.replace(/\.pdf$/i, ''), corners: geo.corners, fitErrM: geo.fitErrM,
+      opacity: 0.9, on: true, createdAt: Date.now(), size: blob.size };
+    await DB.put('maps', { ...m, blob });
+    S.maps.push(m); addMapLayer(m, blob);
+    map.fitBounds(G.maps[m.id].getBounds());
+    prog(''); toast(`Map added: ${m.name}`);
+    if (openKey === 'layers') { openKey = null; openPanel('layers'); }
+  } catch (err) {
+    console.error(err); prog(''); toast('GeoPDF import failed: ' + err.message, 6000);
+  }
+}
+function addMapLayer(m, blob) {
+  const layer = new AffineImage(URL.createObjectURL(blob), m.corners, { opacity: m.opacity });
+  G.maps[m.id] = layer; if (m.on) layer.addTo(map);
+}
+async function saveMapMeta(m) { const rec = await DB.get('maps', m.id); if (rec) await DB.put('maps', { ...rec, ...m }); }
+function setMapOn(id, on) {
+  const m = S.maps.find((x) => x.id === id); if (!m) return;
+  m.on = on; on ? G.maps[id].addTo(map) : map.removeLayer(G.maps[id]); saveMapMeta(m);
+}
+function setMapOpacity(id, o) {
+  const m = S.maps.find((x) => x.id === id); if (!m) return;
+  m.opacity = o; G.maps[id].setOpacity(o); clearTimeout(m._t); m._t = setTimeout(() => { delete m._t; saveMapMeta(m); }, 400);
+}
+async function deleteMap(id) {
+  const m = S.maps.find((x) => x.id === id); if (!m || !confirm(`Remove map "${m.name}" from this device?`)) return;
+  map.removeLayer(G.maps[id]); delete G.maps[id];
+  S.maps = S.maps.filter((x) => x.id !== id); await DB.del('maps', id);
+  openKey = null; openPanel('layers');
+}
+async function loadMaps() {
+  for (const rec of await DB.all('maps')) {
+    const { blob, ...m } = rec; S.maps.push(m); addMapLayer(m, blob);
+  }
+}
+
+// ---------------------------------------------------------------- export (GeoJSON / KML / GPX / CSV)
+function exportChoices() {
+  const out = [['all', 'All my data'], ['kind:point', 'Points'], ['kind:line', 'Lines'], ['kind:polygon', 'Polygons'], ['kind:triage', 'Structure triage']];
+  [...new Set(S.features.filter((f) => f.kind !== 'triage').map((f) => f.category))].sort().forEach((c) => out.push(['cat:' + c, '• ' + c]));
+  return out;
+}
+function pickFeatures(what) {
+  if (what === 'all') return S.features;
+  const [k, v] = [what.slice(0, what.indexOf(':')), what.slice(what.indexOf(':') + 1)];
+  return S.features.filter((f) => (k === 'kind' ? f.kind === v : f.category === v));
+}
+const xml = (v) => String(v ?? '').replace(/[<>&'"]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', "'": '&apos;', '"': '&quot;' }[c]));
+const flatProps = (p) => Object.entries(p).filter(([k, v]) => k !== 'photo' && v !== '' && v != null).map(([k, v]) => [k, Array.isArray(v) ? v.join('; ') : k.endsWith('At') ? new Date(v).toISOString() : v]);
+const featName = (f) => f.props.label || f.props.address || f.category;
+function kmlColor(hex, alpha = 'ff') { const h6 = hex.replace('#', ''); return alpha + h6.slice(4, 6) + h6.slice(2, 4) + h6.slice(0, 2); }
+
+function toKML(feats, withTrack) {
+  const styles = new Map();
+  const pm = feats.map((f) => {
+    const c = catOf(f), sid = 's' + (styles.size + 1);
+    if (!styles.has(c.id)) styles.set(c.id, { id: sid, color: c.color, kind: f.kind });
+    const st = styles.get(c.id).id;
+    const g = f.geometry;
+    const coords = (arr) => arr.map(([x, y]) => `${x},${y}`).join(' ');
+    const geom = g.type === 'Point' ? `<Point><coordinates>${g.coordinates[0]},${g.coordinates[1]}${f.props.elevFt != null ? ',' + (f.props.elevFt / 3.28084).toFixed(1) : ''}</coordinates></Point>`
+      : g.type === 'LineString' ? `<LineString><tessellate>1</tessellate><coordinates>${coords(g.coordinates)}</coordinates></LineString>`
+      : `<Polygon><outerBoundaryIs><LinearRing><coordinates>${coords(g.coordinates[0])}</coordinates></LinearRing></outerBoundaryIs></Polygon>`;
+    const data = [['category', f.category], ...flatProps(f.props)].map(([k, v]) => `<Data name="${xml(k)}"><value>${xml(v)}</value></Data>`).join('');
+    return `<Placemark><name>${xml(featName(f))}</name><description>${xml(f.props.notes || f.category)}</description><styleUrl>#${st}</styleUrl><ExtendedData>${data}</ExtendedData>${geom}</Placemark>`;
+  });
+  if (withTrack && S.track?.points.length > 1) {
+    pm.push(`<Placemark><name>My GPS track</name><styleUrl>#track</styleUrl><LineString><tessellate>1</tessellate><coordinates>${S.track.points.map(([la, ln]) => `${ln},${la}`).join(' ')}</coordinates></LineString></Placemark>`);
+  }
+  const st = [...styles.values()].map((s) => `<Style id="${s.id}"><IconStyle><color>${kmlColor(s.color)}</color><scale>1.1</scale></IconStyle><LineStyle><color>${kmlColor(s.color)}</color><width>3</width></LineStyle><PolyStyle><color>${kmlColor(s.color, '55')}</color></PolyStyle></Style>`).join('');
+  return `<?xml version="1.0" encoding="UTF-8"?>\n<kml xmlns="http://www.opengis.net/kml/2.2"><Document><name>FireLine Field ${stamp()}</name>${st}<Style id="track"><LineStyle><color>ff3b3bff</color><width>3</width></LineStyle></Style>${pm.join('\n')}</Document></kml>`;
+}
+function toGPX(feats, withTrack) {
+  const wpts = [], trks = [];
+  for (const f of feats) {
+    const g = f.geometry, name = xml(featName(f)), desc = xml([f.category, f.props.notes].filter(Boolean).join(' — '));
+    if (g.type === 'Point') {
+      wpts.push(`<wpt lat="${g.coordinates[1]}" lon="${g.coordinates[0]}">${f.props.elevFt != null ? `<ele>${(f.props.elevFt / 3.28084).toFixed(1)}</ele>` : ''}${f.props.createdAt ? `<time>${new Date(f.props.createdAt).toISOString()}</time>` : ''}<name>${name}</name><desc>${desc}</desc><type>${xml(f.category)}</type></wpt>`);
+    } else {
+      const ring = g.type === 'LineString' ? g.coordinates : g.coordinates[0];
+      trks.push(`<trk><name>${name}</name><desc>${desc}</desc><type>${xml(f.category)}</type><trkseg>${ring.map(([x, y]) => `<trkpt lat="${y}" lon="${x}"/>`).join('')}</trkseg></trk>`);
+    }
+  }
+  if (withTrack && S.track?.points.length > 1) {
+    trks.push(`<trk><name>My GPS track</name><trkseg>${S.track.points.map(([la, ln, t]) => `<trkpt lat="${la}" lon="${ln}"><time>${new Date(t).toISOString()}</time></trkpt>`).join('')}</trkseg></trk>`);
+  }
+  return `<?xml version="1.0" encoding="UTF-8"?>\n<gpx version="1.1" creator="FireLine Field" xmlns="http://www.topografix.com/GPX/1/1">\n${wpts.join('\n')}\n${trks.join('\n')}\n</gpx>`;
+}
+function toCSV(feats) {
+  const pts = feats.filter((f) => f.geometry.type === 'Point');
+  const cols = ['name', 'category', 'lat', 'lon', 'ddm', 'elev_ft', 'notes', 'by', 'created',
+    'status', 'structureType', 'roof', 'space', 'access', 'water', 'hazards', 'residents'];
+  const q = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+  const rows = pts.map((f) => {
+    const [lng, lat] = f.geometry.coordinates, p = f.props;
+    return [featName(f), f.category, lat, lng, ddm(lat, lng), p.elevFt != null ? Math.round(p.elevFt) : '', p.notes, p.by, fmtDate(p.createdAt),
+      p.status, p.structureType, p.roof, p.space, p.access, p.water, (p.hazards || []).join('; '), p.residents].map(q).join(',');
+  });
+  return [cols.join(','), ...rows].join('\n');
+}
+function buildExport(fmt, what, withTrack) {
+  const feats = pickFeatures(what);
+  const base = `fireline-${what === 'all' ? 'all' : what.split(':')[1].toLowerCase().replace(/[^a-z0-9]+/g, '-')}-${stamp()}`;
+  if (fmt === 'kml') return { name: base + '.kml', type: 'application/vnd.google-earth.kml+xml', text: toKML(feats, withTrack), n: feats.length };
+  if (fmt === 'gpx') return { name: base + '.gpx', type: 'application/gpx+xml', text: toGPX(feats, withTrack), n: feats.length };
+  if (fmt === 'csv') return { name: base + '.csv', type: 'text/csv', text: toCSV(feats), n: feats.filter((f) => f.geometry.type === 'Point').length };
+  const gj = toGeoJSON(); gj.features = gj.features.filter((x) => feats.some((f) => f.id === x.id));
+  return { name: base + '.geojson', type: 'application/geo+json', text: JSON.stringify(gj, null, 1), n: feats.length };
+}
+
+// ---------------------------------------------------------------- night mode (red light)
+function setNight(on) {
+  document.documentElement.classList.toggle('night', on);
+  localStorage.setItem('night', on ? '1' : '0');
+  $('#night-btn').classList.toggle('on', on);
+  document.querySelector('meta[name=theme-color]').content = on ? '#000000' : '#0a0606';
+}
+$('#night-btn').onclick = () => setNight(!document.documentElement.classList.contains('night'));
+
 // ---------------------------------------------------------------- misc wiring
 map.on('mousemove', (e) => { $('#coords').textContent = ddm(e.latlng.lat, e.latlng.lng); });
 map.on('moveend', () => { if (!matchMedia('(hover: hover)').matches) { const c = map.getCenter(); $('#coords').textContent = '⌖ ' + ddm(c.lat, c.lng); } });
-map.on('contextmenu', (e) => {
-  L.popup().setLatLng(e.latlng).setContent(`<h4>Location</h4>${ddm(e.latlng.lat, e.latlng.lng)}<br>${e.latlng.lat.toFixed(5)}, ${e.latlng.lng.toFixed(5)}`).openOn(map);
-});
+function locationPopup(ll) {
+  const base = `<h4>Location</h4>${ddm(ll.lat, ll.lng)}<br>${ll.lat.toFixed(5)}, ${ll.lng.toFixed(5)}`;
+  const pop = L.popup().setLatLng(ll).setContent(`${base}<br>Elevation: ${navigator.onLine ? 'looking up…' : 'needs signal'}
+    <div class="btns">${ptButtons(ll.lat, ll.lng, ddm(ll.lat, ll.lng))}</div>`).openOn(map);
+  getElevationFt(ll.lat, ll.lng).then((v) => {
+    if (!pop.isOpen()) return;
+    pop.setContent(`${base}<br>Elevation: <b>${v != null ? Math.round(v).toLocaleString() + ' ft' : 'n/a'}</b>
+      <div class="btns">${ptButtons(ll.lat, ll.lng, ddm(ll.lat, ll.lng), v)}</div>`);
+  });
+}
+map.on('contextmenu', (e) => { if (!S.draw) locationPopup(e.latlng); });
 
 function setNet() { const on = navigator.onLine; $('#net').textContent = on ? 'online' : 'OFFLINE'; $('#net').className = on ? 'pill' : 'pill bad'; }
-addEventListener('online', () => { setNet(); refreshNifc(); });
+addEventListener('online', () => { setNet(); refreshNifc(); backfillElevations(); });
 addEventListener('offline', setNet);
 
 function saveSettings() {
@@ -882,6 +1317,8 @@ function signOut() {
 }
 
 async function init() {
+  document.querySelectorAll('[data-icon]').forEach((el) => (el.innerHTML = ICON[el.dataset.icon] || ''));
+  setNight(localStorage.getItem('night') === '1');
   S.session = await requireLogin();
   try {
     const st = JSON.parse(localStorage.getItem('settings') || 'null');
@@ -896,6 +1333,8 @@ async function init() {
   S.features = await DB.all('features');
   S.track = (await DB.get('tracks', 'current')) || null;
   renderMine(); renderTrack(); setNet(); refreshNifc();
+  loadMaps().catch((e) => console.error('maps', e));
+  backfillElevations();
   if ('serviceWorker' in navigator && location.protocol.startsWith('http')) navigator.serviceWorker.register('sw.js').catch(() => {});
 }
 init();

@@ -6,14 +6,20 @@ A simple, offline-first web app for wildland firefighters. It runs in any phone 
 
 | Tab | Features |
 |---|---|
-| **Layers** | Live NIFC data (public, no login): current incidents (WFIGS/IRWIN), current fire perimeters, VIIRS/MODIS hotspots (last 48 h). Your own data, GPS track, 4 basemaps, legend. |
-| **Collect** | NIFS-style points (drop points, safety zones, helispots, water, hazards, origin…), lines (fire edge, dozer/hand line, escape routes…) and polygons (daily perimeter, heat, divisions…). Tap the map or use **+ GPS**. Shows live length in chains/feet/miles and area in acres. |
+| **Maps** | **Import GeoPDF incident maps from the IAP**: stored on the phone, work offline, show your GPS dot and markup on top, with an opacity slider. Live NIFC data (public, no login): current incidents, current fire perimeters, VIIRS/MODIS hotspots (last 48 h). Your own data, GPS track, 4 basemaps, legend. |
+| **Mark** | NIFS-style points (drop points, safety zones, helispots, water, hazards, origin…), lines (fire edge, dozer/hand line, escape routes…) and polygons (daily perimeter, heat, divisions…). Tap the map or use **+ GPS**. Shows live length in chains/feet/miles and area in acres. Every point gets its ground elevation automatically. |
+| **Nav** | **Navigate to any waypoint, marker, incident or typed coordinate**: live distance, true bearing (plus magnetic if you set your declination), elevation climb/descent and average slope. Your position, accuracy, ground elevation and GPS altitude; copy your coordinates. Distance/bearing and area measuring. Breadcrumb tracking (save a walked track as a line). |
 | **Triage** | Structure triage using NWCG categories (Prep and Leave, Stand Alone, Prep and Defend, Rescue Drill), plus status, roof, defensible space, access, water, hazards, residents, notes and a photo. Summary counts per category. |
-| **Tools** | GPS with accuracy, breadcrumb tracking (save a walked track as a line), distance/area measure, go to coordinates (decimal or DDM). |
-| **Data** | Export GeoJSON (opens in ArcGIS Online/Pro, QGIS, CalTopo, Avenza), triage CSV, share sheet, import GeoJSON, **download the on-screen map area for offline use**. |
+| **Data** | Export **all data, one kind, or a single layer/category** as **KML** (Google Earth, Avenza, Gaia, CalTopo, ArcGIS), **GPX** (handheld GPS units), **GeoJSON** (ArcGIS, QGIS, NIFS) or **CSV**, with or without your track. Share sheet, import GeoJSON, **download the on-screen map area for offline use**. |
 | **Intel** | Incident search, plus links to FireGuard, NIFC AGOL account request, NIFC Open Data, EGP/WildFireSA, IMSR and IAA. |
 
-Everything you collect is stored on the device (IndexedDB), so it works with no signal. The last downloaded NIFC layers are also kept for offline viewing. Long-press / right-click the map to read a coordinate.
+Tap any marker or incident for **Navigate** and **Copy** (coordinates in DDM + decimal). Long-press / right-click the map anywhere for the coordinate, its elevation, Navigate and Copy.
+
+The **moon button** (top right) switches to **red-light night mode**, which turns the whole screen, map included, dim red on black to protect night vision.
+
+Everything you collect is stored on the device (IndexedDB), so it works with no signal. The last downloaded NIFC layers are also kept for offline viewing.
+
+**Notes:** Elevation comes from the USGS 3DEP elevation service (public domain, US only, needs signal; points marked offline get it filled in automatically once you're back in coverage). GeoPDF import reads the ISO/OGC georeferencing that ArcGIS and IAP map products write; older TerraGo-only GeoPDFs need re-exporting. The first GeoPDF import needs signal once to download the PDF reader.
 
 ## Crew sign-in
 

@@ -4,7 +4,7 @@
   "description": "Offline-capable wildland fire mapping, data collection and structure triage.",
   "start_url": "./index.html",
   "display": "standalone",
-  "background_color": "#1b1410",
-  "theme_color": "#1b1410",
+  "background_color": "#0a0606",
+  "theme_color": "#0a0606",
   "icons": [{ "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }]
 }

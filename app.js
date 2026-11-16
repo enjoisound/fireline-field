@@ -23,30 +23,69 @@ const ICON = {
 
 // ---------------------------------------------------------------- config
 // Categories modeled on the National Incident Feature Service (NIFS) event layers.
+// Map-pin glyphs (24x24, drawn in the pin's ink color). Original artwork, not official NWCG symbols.
+const GLYPH = {
+  flag: '<path d="M6 21V3.5"/><path d="M6 4h11.5l-2.8 4.2 2.8 4.3H6z" fill="INK"/>',
+  tent: '<path d="M2.5 20L12 4l9.5 16z"/><path d="M12 20l-3-6h6z" fill="INK"/>',
+  cross: '<path d="M12 4.5v15M4.5 12h15" stroke-width="4"/>',
+  drop: '<path d="M12 3s6.5 7.2 6.5 11.3a6.5 6.5 0 0 1-13 0C5.5 10.2 12 3 12 3z" fill="INK"/>',
+  warn: '<path d="M12 3.5L22 20H2z"/><path d="M12 9.5v5M12 17.3v.2" stroke-width="2.8"/>',
+  eye: '<path d="M1.5 12S5.5 5 12 5s10.5 7 10.5 7-4 7-10.5 7S1.5 12 1.5 12z"/><circle cx="12" cy="12" r="3.2" fill="INK"/>',
+  flame: '<path d="M12 2.5c1.2 4.2 6.5 6.5 6.5 12a6.5 6.5 0 0 1-13 0c0-3.3 2-5.4 3.3-7.4 0 2.2 1 3.6 2.3 4.1C10.3 7.3 11.2 4.8 12 2.5z" fill="INK" stroke="none"/>',
+  arrow: '<path d="M3 12h15M12.5 5.5L19 12l-6.5 6.5" stroke-width="3"/>',
+  dozer: '<rect x="2" y="16" width="13" height="4.5" rx="2.2"/><rect x="4" y="9.5" width="9" height="6.5"/><path d="M6.5 9.5V5h4.5v4.5"/><path d="M13 13h4"/><path d="M17.5 7.5l4 1.2v11l-4-.8z" fill="INK"/>',
+  engine: '<rect x="1.5" y="8" width="12.5" height="8.5"/><path d="M14 11h4.5l3.5 3.5v2H14z"/><circle cx="6" cy="18.5" r="2" fill="INK"/><circle cx="17.5" cy="18.5" r="2" fill="INK"/><path d="M2.5 5.5h10"/>',
+  crew: '<circle cx="8" cy="7.5" r="2.8"/><circle cx="16.5" cy="7.5" r="2.8"/><path d="M2.5 20c0-3.6 2.4-6 5.5-6s5.5 2.4 5.5 6M11 20c0-3.6 2.4-6 5.5-6s5.5 2.4 5.5 6"/>',
+  block: '<circle cx="12" cy="12" r="8.5"/><path d="M6.5 12h11" stroke-width="3.6"/>',
+  antenna: '<path d="M12 11v10M7.5 21h9"/><circle cx="12" cy="8.5" r="2.2" fill="INK"/><path d="M6.5 3.5a7.5 7.5 0 0 0 0 10M17.5 3.5a7.5 7.5 0 0 1 0 10"/>',
+  box: '<path d="M3 7.5l9-4 9 4v9.5l-9 4-9-4z"/><path d="M3 7.5l9 4 9-4M12 11.5v9.5"/>',
+};
 const POINT_CATS = [
-  { id: 'Drop Point',      color: '#2f8cff', code: 'DP' },
-  { id: 'Safety Zone',     color: '#3fbf6f', code: 'SZ' },
-  { id: 'Escape Route Entry', color: '#7ee08f', code: 'ER' },
-  { id: 'Helispot',        color: '#9b6bff', code: 'H' },
-  { id: 'Water Source',    color: '#1ec8e6', code: 'W' },
-  { id: 'Hazard',          color: '#ffb020', code: '!' },
-  { id: 'Point of Origin', color: '#e5484d', code: 'PO' },
-  { id: 'Spot Fire',       color: '#ff3b1a', code: 'SF' },
-  { id: 'ICP',             color: '#ffd23f', code: 'ICP' },
-  { id: 'Staging Area',    color: '#c9a27a', code: 'S' },
-  { id: 'Medical / EMS',   color: '#ff5fa2', code: '+' },
-  { id: 'Lookout',         color: '#f5ece4', code: 'LO' },
+  // Command & support
+  { id: 'ICP', name: 'Incident Command Post (ICP)', group: 'Command & support', color: '#ffd23f', ink: '#1a1200', glyph: 'flag' },
+  { id: 'Staging Area', group: 'Command & support', color: '#c9a27a', ink: '#1a1200', code: 'S' },
+  { id: 'Camp / Base', group: 'Command & support', color: '#a1734a', glyph: 'tent' },
+  { id: 'Drop Point', group: 'Command & support', color: '#2f8cff', code: 'DP' },
+  { id: 'Helibase', group: 'Command & support', color: '#7c4dff', code: 'HB' },
+  { id: 'Helispot', group: 'Command & support', color: '#9b6bff', code: 'H' },
+  { id: 'Medical / EMS', group: 'Command & support', color: '#ff5fa2', glyph: 'cross' },
+  { id: 'Supply / Fuel', group: 'Command & support', color: '#8d6e63', glyph: 'box' },
+  { id: 'Comms / Repeater', group: 'Command & support', color: '#5c6bc0', glyph: 'antenna' },
+  // Safety
+  { id: 'Safety Zone', group: 'Safety', color: '#3fbf6f', code: 'SZ' },
+  { id: 'Escape Route Entry', group: 'Safety', color: '#7ee08f', ink: '#062b12', glyph: 'arrow' },
+  { id: 'Lookout', group: 'Safety', color: '#f5ece4', ink: '#1a1200', glyph: 'eye' },
+  { id: 'Hazard', group: 'Safety', color: '#ffb020', ink: '#1a1200', glyph: 'warn' },
+  { id: 'Road Closure / Block', group: 'Safety', color: '#e53935', glyph: 'block' },
+  // Fire
+  { id: 'Point of Origin', group: 'Fire', color: '#e5484d', code: 'PO' },
+  { id: 'Spot Fire', group: 'Fire', color: '#ff3b1a', glyph: 'flame' },
+  // Resources & water
+  { id: 'Dozer', group: 'Resources & water', color: '#f9a825', ink: '#1a1200', glyph: 'dozer' },
+  { id: 'Engine', group: 'Resources & water', color: '#d32f2f', glyph: 'engine' },
+  { id: 'Crew', group: 'Resources & water', color: '#43a047', glyph: 'crew' },
+  { id: 'Water Source', group: 'Resources & water', color: '#1ec8e6', ink: '#00222a', glyph: 'drop' },
 ];
+const catName = (c) => c.name || c.id;
+function pinSvg(c, w = 30) {
+  const ink = c.ink || '#fff';
+  const inner = c.glyph
+    ? `<g transform="translate(7 7) scale(.667)" fill="none" stroke="${ink}" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">${GLYPH[c.glyph].replace(/INK/g, ink)}</g>`
+    : `<text x="15" y="${c.code.length > 1 ? 18.6 : 19.6}" text-anchor="middle" font-size="${c.code.length > 1 ? 10.5 : 12.5}" font-weight="800" fill="${ink}" font-family="Arial, Helvetica, sans-serif">${esc(c.code)}</text>`;
+  return `<svg viewBox="0 0 30 40" width="${w}" height="${(w * 4) / 3}" aria-hidden="true"><path d="M15 39C15 39 3 25 3 15a12 12 0 1 1 24 0c0 10-12 24-12 24z" fill="${c.color}" stroke="#000" stroke-opacity=".55" stroke-width="1.3"/>${inner}</svg>`;
+}
+const pinIcon = (c) => L.divIcon({ className: 'pin-icon', html: pinSvg(c), iconSize: [30, 40], iconAnchor: [15, 39], popupAnchor: [0, -34], tooltipAnchor: [0, 0] });
 const LINE_CATS = [
   { id: 'Uncontrolled Fire Edge', color: '#ff2a1a', weight: 4 },
-  { id: 'Completed Dozer Line',   color: '#111111', weight: 4, outline: '#ffd23f' },
-  { id: 'Completed Hand Line',    color: '#111111', weight: 3, dash: '8 4', outline: '#ffd23f' },
-  { id: 'Proposed Dozer Line',    color: '#ffd23f', weight: 3, dash: '10 6' },
-  { id: 'Proposed Hand Line',     color: '#ffd23f', weight: 2, dash: '4 6' },
+  { id: 'Completed Dozer Line',   color: '#111111', weight: 4, outline: '#ffffff', deco: 'x' },
+  { id: 'Completed Hand Line',    color: '#111111', weight: 3, outline: '#ffffff', deco: 'tick' },
+  { id: 'Proposed Dozer Line',    color: '#111111', weight: 3, dash: '10 7', outline: '#ffffff', deco: 'x' },
+  { id: 'Proposed Hand Line',     color: '#111111', weight: 2.5, dash: '6 6', outline: '#ffffff', deco: 'tick' },
   { id: 'Road as Completed Line', color: '#8a8a8a', weight: 4 },
   { id: 'Wet Line / Hose Lay',    color: '#1ec8e6', weight: 3, dash: '2 5' },
   { id: 'Escape Route',           color: '#3fbf6f', weight: 3, dash: '12 4 2 4' },
   { id: 'Contained Line',         color: '#111111', weight: 5, outline: '#3fbf6f' },
+  { id: 'Contingency Line',       color: '#2f8cff', weight: 3, dash: '10 5', outline: '#ffffff', deco: 'tick' },
 ];
 const POLY_CATS = [
   { id: 'Wildfire Daily Fire Perimeter', color: '#ff2a1a', fill: 0.12 },
@@ -322,35 +361,82 @@ function featurePopup(f) {
     ptBtns = ptButtons(lat, lng, p.label || p.address || f.category, p.elevFt);
   }
   const photo = p.photo ? `<img src="${p.photo}" style="max-width:220px;border-radius:6px;margin-top:6px">` : '';
-  return `<h4>${esc(f.category)}</h4><table>${rows.join('')}</table>${photo}
+  return `<h4>${esc(catName(catOf(f)) || f.category)}</h4><table>${rows.join('')}</table>${photo}
     <div class="btns">${ptBtns}<button class="btn" data-edit="${f.id}">Edit</button><button class="btn danger" data-del="${f.id}">Delete</button></div>`;
 }
 
+// X's (dozer) or ticks (hand line) spaced along a line in screen pixels; redrawn on zoom.
+function decoratePath(latlngs, c, group) {
+  const pts = latlngs.map((ll) => map.latLngToLayerPoint(ll)), segs = [], step = 22;
+  let carry = step / 2;
+  for (let i = 1; i < pts.length; i++) {
+    const a = pts[i - 1], b = pts[i], dx = b.x - a.x, dy = b.y - a.y, len = Math.hypot(dx, dy);
+    if (!len) continue;
+    const ux = dx / len, uy = dy / len, nx = -uy, ny = ux;
+    let d = carry;
+    for (; d < len; d += step) {
+      const px = a.x + ux * d, py = a.y + uy * d;
+      if (c.deco === 'tick') segs.push([[px + nx * 5.5, py + ny * 5.5], [px - nx * 5.5, py - ny * 5.5]]);
+      else {
+        const k = 4.2;
+        segs.push([[px + (ux + nx) * k, py + (uy + ny) * k], [px - (ux + nx) * k, py - (uy + ny) * k]]);
+        segs.push([[px + (ux - nx) * k, py + (uy - ny) * k], [px - (ux - nx) * k, py - (uy - ny) * k]]);
+      }
+    }
+    carry = d - len;
+  }
+  if (!segs.length) return;
+  const ll = segs.map((sg) => sg.map(([x, y]) => map.layerPointToLatLng(L.point(x, y))));
+  if (c.outline) L.polyline(ll, { color: c.outline, weight: 5, opacity: 0.9, interactive: false }).addTo(group);
+  L.polyline(ll, { color: c.color, weight: 2.2, interactive: false }).addTo(group);
+}
+let decoItems = [];
+function redrawDeco() {
+  if (!G.lineDeco) return;
+  G.lineDeco.clearLayers();
+  for (const it of decoItems) decoratePath(it.ll, it.c, G.lineDeco);
+}
+map.on('zoomend', redrawDeco);
+// Point labels only when zoomed in enough to read them
+const syncLabelZoom = () => map.getContainer().classList.toggle('labels-off', map.getZoom() < 12);
+map.on('zoomend', syncLabelZoom);
+
 function renderMine() {
   G.mine.clearLayers(); G.triage.clearLayers();
+  G.lineDeco = L.layerGroup().addTo(G.mine); decoItems = [];
   for (const f of S.features) {
     const c = catOf(f);
     let lyr;
-    if (f.kind === 'point' || f.kind === 'triage') {
+    if (f.kind === 'point') {
       const [lng, lat] = f.geometry.coordinates;
-      lyr = L.marker([lat, lng], { icon: symIcon(c.color, c.code, f.kind === 'triage' ? 24 : 26) });
+      lyr = L.marker([lat, lng], { icon: pinIcon(c) });
+      if (f.props.label) lyr.bindTooltip(esc(f.props.label), { permanent: true, direction: 'bottom', className: 'map-label', offset: [0, 2] });
+    } else if (f.kind === 'triage') {
+      const [lng, lat] = f.geometry.coordinates;
+      lyr = L.marker([lat, lng], { icon: symIcon(c.color, c.code, 24) });
     } else if (f.kind === 'line') {
       const ll = toLL(f.geometry.coordinates);
-      if (c.outline) L.polyline(ll, { color: c.outline, weight: c.weight + 3, opacity: 0.8, interactive: false }).addTo(G.mine);
+      if (c.outline) L.polyline(ll, { color: c.outline, weight: c.weight + 3, opacity: 0.85, interactive: false }).addTo(G.mine);
       lyr = L.polyline(ll, { color: c.color, weight: c.weight, dashArray: c.dash });
+      if (c.deco) decoItems.push({ ll, c });
     } else {
       lyr = L.polygon(toLL(f.geometry.coordinates[0]), { color: c.color, weight: 2, fillColor: c.color, fillOpacity: c.fill });
     }
     lyr.bindPopup(() => featurePopup(f));
     lyr.addTo(f.kind === 'triage' ? G.triage : G.mine);
   }
+  redrawDeco(); syncLabelZoom();
 }
 
 document.addEventListener('click', async (e) => {
   const del = e.target.closest('[data-del]'); const ed = e.target.closest('[data-edit]');
   const nav = e.target.closest('[data-nav]'); const cp = e.target.closest('[data-copy]');
   const wx = e.target.closest('[data-wx]'); const inc = e.target.closest('[data-inc-notes]');
-  if (wx) {
+  const mk = e.target.closest('[data-mark]');
+  if (mk) {
+    const [lat, lng] = mk.dataset.mark.split(',').map(Number); map.closePopup();
+    S.placeAt = { lat, lng }; openKey = null; openPanel('collect');
+  } else if (wx) {
     const [lat, lng] = wx.dataset.wx.split(',').map(Number); map.closePopup(); showWeather(lat, lng, wx.dataset.name);
   } else if (inc) {
     openIncidentNotes(inc.dataset.incNotes);
@@ -434,7 +520,28 @@ function startDraw(kind, category, onDone) {
   updateDraw();
   if (kind === 'point' || kind === 'triage') toast('Tap the map where it is — or use + GPS');
 }
-function endDrawMode() { S.draw = null; map.getContainer().classList.remove('drawing'); $('#drawbar').classList.add('hidden'); }
+function endDrawMode() { S.draw = null; map.getContainer().classList.remove('drawing'); $('#drawbar').classList.add('hidden'); keepAwake(S.tracking); }
+// Screens that lock stop GPS in a web app, so keep the screen on while tracing or tracking.
+let wakeLock = null;
+async function keepAwake(on) {
+  try {
+    if (on && 'wakeLock' in navigator && !wakeLock) { wakeLock = await navigator.wakeLock.request('screen'); wakeLock.addEventListener('release', () => { wakeLock = null; }); }
+    else if (!on && wakeLock) { await wakeLock.release(); wakeLock = null; }
+  } catch { /* not supported or denied */ }
+}
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && (S.tracking || S.draw?.trace)) keepAwake(true); });
+function toggleTrace() {
+  const d = S.draw; if (!d) return;
+  d.trace = !d.trace;
+  if (d.trace) { startGps(); keepAwake(true); if (S.me) traceFix(); toast('Tracing: drive or walk the line. Screen stays on. Tap Finish when done.', 4000); }
+  else keepAwake(S.tracking);
+  updateDraw();
+}
+function traceFix() {
+  const d = S.draw; if (!d?.trace || !S.me || S.me.acc > 30) return;
+  const last = d.pts[d.pts.length - 1];
+  if (!last || dist(last, S.me) >= 8) { d.pts.push(L.latLng(S.me.lat, S.me.lng)); updateDraw(); }
+}
 function cancelDraw() { endDrawMode(); G.draw.clearLayers(); }
 
 function addVertex(ll) {
@@ -463,6 +570,11 @@ function updateDraw() {
   }
   $('#drawinfo').innerHTML = info;
   $('#d-finish').classList.toggle('hidden', d.kind === 'point' || d.kind === 'triage');
+  const canTrace = d.kind === 'line' || d.kind === 'polygon' || d.kind === 'measure-line';
+  $('#d-trace').classList.toggle('hidden', !canTrace);
+  $('#d-trace').classList.toggle('primary', !!d.trace);
+  $('#d-trace').textContent = d.trace ? '■ Stop trace' : '● Trace GPS';
+  if (d.trace) $('#drawinfo').innerHTML = `<b>● TRACING</b> ${S.me ? `±${Math.round(S.me.acc * 3.28084)} ft` : 'waiting for GPS…'}<br>` + $('#drawinfo').innerHTML;
   $('#d-undo').classList.toggle('hidden', d.kind === 'point' || d.kind === 'triage');
 }
 
@@ -485,6 +597,7 @@ map.on('click', (e) => { if (S.draw) addVertex(e.latlng); });
 $('#d-undo').onclick = () => { if (S.draw) { S.draw.pts.pop(); updateDraw(); } };
 $('#d-cancel').onclick = cancelDraw;
 $('#d-finish').onclick = finishDraw;
+$('#d-trace').onclick = toggleTrace;
 $('#d-gps').onclick = () => {
   if (!S.me) { toast('No GPS fix yet — turn on GPS in Tools'); startGps(); return; }
   addVertex(S.me);
@@ -493,7 +606,7 @@ $('#d-gps').onclick = () => {
 // ---------------------------------------------------------------- panels
 const PANELS = {
   layers: { title: 'Maps & layers', render: renderLayers },
-  collect: { title: 'Collect data', render: renderCollect },
+  collect: { title: 'Mark the map', render: renderCollect },
   triage: { title: 'Structure triage', render: renderTriage },
   tools: { title: 'Navigate & measure', render: renderTools },
   data: { title: 'My data & offline', render: renderData },
@@ -510,7 +623,7 @@ function openPanel(key) {
   $('#panel').classList.remove('hidden');
 }
 function closePanel() {
-  openKey = null; $('#panel').classList.add('hidden');
+  openKey = null; S.placeAt = null; $('#panel').classList.add('hidden');
   document.querySelectorAll('.toolbar button').forEach((b) => b.classList.remove('active'));
 }
 function showForm(title, build) {
@@ -556,7 +669,8 @@ function renderLayers(el) {
     ${Object.keys(BASEMAPS).map((n) => `<label class="row"><input type="radio" name="bm" value="${n}" ${n === S.basemap ? 'checked' : ''}><span class="grow">${n}</span></label>`).join('')}
     <h3>Legend</h3>
     <div class="legend">
-      ${LINE_CATS.map((c) => `<div class="row"><span class="swatch line" style="background:${c.color};outline:2px solid ${c.outline || 'transparent'}"></span><span class="grow">${c.id}</span></div>`).join('')}
+      ${POINT_CATS.map((c) => `<div class="row"><span class="chip-pin">${pinSvg(c, 20)}</span><span class="grow">${esc(catName(c))}</span></div>`).join('')}
+      ${LINE_CATS.map((c) => `<div class="row"><span class="chip-line">${lineSample(c)}</span><span class="grow">${c.id}</span></div>`).join('')}
       ${TRIAGE_CATS.map((c) => `<div class="row"><span class="swatch dot" style="background:${c.color}"></span><span class="grow">${c.id}</span></div>`).join('')}
     </div>`));
   el.querySelectorAll('[data-layer]').forEach((cb) => (cb.onchange = () => {
@@ -580,17 +694,35 @@ function setBasemap(name) {
 }
 
 // ---- Collect
+function lineSample(c, w = 44) {
+  const h = 14, y = 7, marks = [];
+  if (c.deco) for (let x = 9; x < w - 4; x += 13) {
+    marks.push(c.deco === 'tick' ? `M${x} ${y - 5}V${y + 5}` : `M${x - 3.5} ${y - 3.5}L${x + 3.5} ${y + 3.5}M${x - 3.5} ${y + 3.5}L${x + 3.5} ${y - 3.5}`);
+  }
+  const m = marks.join('');
+  return `<svg viewBox="0 0 ${w} ${h}" width="${w}" height="${h}" aria-hidden="true">
+    ${c.outline ? `<path d="M2 ${y}H${w - 2}" stroke="${c.outline}" stroke-width="${c.weight + 3}" stroke-linecap="round"/>${m ? `<path d="${m}" stroke="${c.outline}" stroke-width="4.5"/>` : ''}` : ''}
+    <path d="M2 ${y}H${w - 2}" stroke="${c.color}" stroke-width="${c.weight}" ${c.dash ? `stroke-dasharray="${c.dash}"` : ''}/>
+    ${m ? `<path d="${m}" stroke="${c.color}" stroke-width="2"/>` : ''}</svg>`;
+}
 function renderCollect(el) {
-  const chips = (cats, kind) => cats.map((c) => `<button class="chip" data-kind="${kind}" data-cat="${esc(c.id)}">
-    <span class="swatch ${kind === 'point' ? 'dot' : kind === 'line' ? 'line' : ''}" style="background:${c.color}"></span>${esc(c.id)}</button>`).join('');
+  const at = S.placeAt;
+  const chip = (c, kind, icon) => `<button class="chip" data-kind="${kind}" data-cat="${esc(c.id)}">${icon}<span>${esc(catName(c))}</span></button>`;
+  const groups = [...new Set(POINT_CATS.map((c) => c.group))];
   el.append(h(`
-    <p class="hint">Categories follow the National Incident Feature Service (NIFS) event layers. Data is saved on this device and works offline.</p>
-    <h3>Points</h3><div class="grid">${chips(POINT_CATS, 'point')}</div>
-    <h3>Lines</h3><div class="grid">${chips(LINE_CATS, 'line')}</div>
-    <h3>Polygons</h3><div class="grid">${chips(POLY_CATS, 'polygon')}</div>`));
+    ${at ? `<div class="place-at">Placing at <b>${ddm(at.lat, at.lng)}</b>. Pick what's there.</div>` : '<p class="hint">Tap a type, then tap the map (or use + GPS). Saved on this phone, shared live if you\'re in a room.</p>'}
+    ${groups.map((g) => `<h3>${esc(g)}</h3><div class="grid">${POINT_CATS.filter((c) => c.group === g).map((c) => chip(c, 'point', `<span class="chip-pin">${pinSvg(c, 27)}</span>`)).join('')}</div>`).join('')}
+    <h3>Lines</h3>
+    <p class="hint"><b>Dozer line:</b> tap points along it on the map, or press <b>Trace GPS</b> and drive or walk it. The line follows your GPS until you finish.</p>
+    <div class="grid">${LINE_CATS.map((c) => chip(c, 'line', `<span class="chip-line">${lineSample(c)}</span>`)).join('')}</div>
+    <h3>Areas</h3><div class="grid">${POLY_CATS.map((c) => chip(c, 'polygon', `<span class="swatch" style="background:${c.color}"></span>`)).join('')}</div>`));
   el.querySelectorAll('.chip').forEach((b) => (b.onclick = () => {
-    const kind = b.dataset.kind, category = b.dataset.cat;
-    startDraw(kind, category, (geometry) => openFeatureForm({ id: uid(), kind, category, geometry, props: { createdAt: Date.now() } }, true));
+    const kind = b.dataset.kind, category = b.dataset.cat, here = S.placeAt;
+    S.placeAt = null;
+    const done = (geometry) => openFeatureForm({ id: uid(), kind, category, geometry, props: { createdAt: Date.now() } }, true);
+    if (here && kind === 'point') { closePanel(); done({ type: 'Point', coordinates: [+here.lng.toFixed(7), +here.lat.toFixed(7)] }); return; }
+    startDraw(kind, category, done);
+    if (here) addVertex(here);
   }));
 }
 
@@ -598,7 +730,7 @@ function openFeatureForm(f, isNew = false) {
   const cats = f.kind === 'point' ? POINT_CATS : f.kind === 'line' ? LINE_CATS : POLY_CATS;
   showForm(isNew ? 'New ' + f.kind : 'Edit ' + f.kind, (el) => {
     el.append(h(`
-      <label class="f">Category<select name="category">${cats.map((c) => `<option ${c.id === f.category ? 'selected' : ''}>${esc(c.id)}</option>`).join('')}</select></label>
+      <label class="f">Category<select name="category">${cats.map((c) => `<option value="${esc(c.id)}" ${c.id === f.category ? 'selected' : ''}>${esc(catName(c))}</option>`).join('')}</select></label>
       <label class="f">Label<input name="label" value="${esc(f.props.label)}" placeholder="e.g. DP 12, Div A"></label>
       <label class="f">Notes<textarea name="notes">${esc(f.props.notes)}</textarea></label>
       <label class="f">Collected by<input name="by" value="${esc(f.props.by || localStorage.getItem('by') || '')}" placeholder="Name / resource"></label>
@@ -804,7 +936,7 @@ function onFix(pos) {
   L.marker([lat, lng], { icon: L.divIcon({ className: 'me-dot', iconSize: [16, 16] }), interactive: false }).addTo(G.me);
   if (firstFix) { firstFix = false; map.setView([lat, lng], Math.max(map.getZoom(), 14)); }
   const fx = $('#t-fix'); if (fx) fx.innerHTML = fixText();
-  refreshGround(); updateNav(); checkRfwBanner();
+  refreshGround(); updateNav(); checkRfwBanner(); traceFix();
   if (S.tracking && acc < 50) {
     const last = S.track.points[S.track.points.length - 1];
     if (!last || dist({ lat: last[0], lng: last[1] }, S.me) > 5) {
@@ -1757,14 +1889,15 @@ addEventListener('online', updateSyncPill); addEventListener('offline', updateSy
 // ---------------------------------------------------------------- misc wiring
 map.on('mousemove', (e) => { $('#coords').textContent = ddm(e.latlng.lat, e.latlng.lng); });
 map.on('moveend', () => { if (!matchMedia('(hover: hover)').matches) { const c = map.getCenter(); $('#coords').textContent = '⌖ ' + ddm(c.lat, c.lng); } });
+const markHereBtn = (ll) => `<button class="btn primary" data-mark="${ll.lat},${ll.lng}">${ICON.mark} Mark here</button>`;
 function locationPopup(ll) {
   const base = `<h4>Location</h4>${ddm(ll.lat, ll.lng)}<br>${ll.lat.toFixed(5)}, ${ll.lng.toFixed(5)}`;
   const pop = L.popup().setLatLng(ll).setContent(`${base}<br>Elevation: ${navigator.onLine ? 'looking up…' : 'needs signal'}
-    <div class="btns">${ptButtons(ll.lat, ll.lng, ddm(ll.lat, ll.lng))}</div>`).openOn(map);
+    <div class="btns">${markHereBtn(ll)}${ptButtons(ll.lat, ll.lng, ddm(ll.lat, ll.lng))}</div>`).openOn(map);
   getElevationFt(ll.lat, ll.lng).then((v) => {
     if (!pop.isOpen()) return;
     pop.setContent(`${base}<br>Elevation: <b>${v != null ? Math.round(v).toLocaleString() + ' ft' : 'n/a'}</b>
-      <div class="btns">${ptButtons(ll.lat, ll.lng, ddm(ll.lat, ll.lng), v)}</div>`);
+      <div class="btns">${markHereBtn(ll)}${ptButtons(ll.lat, ll.lng, ddm(ll.lat, ll.lng), v)}</div>`);
   });
 }
 map.on('contextmenu', (e) => { if (!S.draw) locationPopup(e.latlng); });

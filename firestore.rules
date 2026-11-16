@@ -1,0 +1,33 @@
+rules_version = '2';
+// FireLine Field: live sharing security rules.
+// Data lives in "rooms" (an incident or crew). Only members of a room can read or write it.
+// You become a member by knowing the room's share code (a long random code) and joining.
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() { return request.auth != null; }
+    function roomPath(room) { return /databases/$(database)/documents/rooms/$(room); }
+    function isMember(room) {
+      return signedIn() && exists(/databases/$(database)/documents/rooms/$(room)/members/$(request.auth.uid));
+    }
+
+    match /rooms/{room} {
+      allow get: if isMember(room);
+      allow list: if false;  // nobody can browse the list of rooms
+      allow create: if signedIn() && request.resource.data.createdBy == request.auth.uid;
+      allow update, delete: if signedIn() && resource.data.createdBy == request.auth.uid;
+
+      match /members/{uid} {
+        allow read: if isMember(room);
+        allow create, update: if signedIn() && uid == request.auth.uid;
+        // leave the room yourself, or be removed by the person who created it
+        allow delete: if signedIn() && (uid == request.auth.uid || get(roomPath(room)).data.createdBy == request.auth.uid);
+      }
+
+      match /{coll}/{id} {
+        allow read, delete: if coll in ['features', 'notes'] && isMember(room);
+        allow create, update: if coll in ['features', 'notes'] && isMember(room)
+          && request.resource.data.updatedBy == request.auth.uid;
+      }
+    }
+  }
+}

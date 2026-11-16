@@ -21,6 +21,17 @@ Everything you collect is stored on the device (IndexedDB), so it works with no 
 
 **Notes:** Weather and red flag warnings come from the National Weather Service (US only). Offline map downloads use USGS maps only (public domain); other basemaps are still remembered for areas you've viewed. Incident notes are stored on each phone until live sharing is added. Elevation comes from the USGS 3DEP elevation service (public domain, US only, needs signal; points marked offline get it filled in automatically once you're back in coverage). GeoPDF import reads the ISO/OGC georeferencing that ArcGIS and IAP map products write; older TerraGo-only GeoPDFs need re-exporting. The first GeoPDF import needs signal once to download the PDF reader.
 
+## Live team sharing
+
+In **Data → Live team sharing**, create a room for an incident or crew (e.g. "Sawtooth Fire: Div A") and tap **Invite crew…** to text the join link or code. Everyone in the room sees each other's **markers, lines, areas, structure triage and incident notes/photos** live on their map.
+
+- **Works offline:** changes made with no signal are queued on the phone (top bar shows **⇅ QUEUED**) and sync automatically when coverage returns (**⇅ LIVE · number of people**).
+- **Who can see it:** only people who joined with the room's code. The code is long and random, so treat it like a password. The room's creator can remove people. Leaving keeps a copy of everything on your phone.
+- **No extra accounts:** each phone signs in to Firebase anonymously in the background; names come from the crew sign-in.
+- Want to share data you collected before joining? **Share my existing data**.
+
+**Behind the scenes:** Google Firebase (Firestore) on the free Spark plan, project `fireline-field`. Settings are in `firebase-config.js` (safe to publish); security rules are in `firestore.rules` (paste into Firebase console → Firestore → Rules → Publish after any change). Photos are stored inside Firestore records (shrunk to ~1000 px), so no paid storage is needed.
+
 ## Crew sign-in
 
 The app opens with a sign-in screen asking for name, crew/resource and a shared crew passcode. Each device stays signed in (so it opens offline), and the name is stamped on everything collected. Sign out is under **Data**.

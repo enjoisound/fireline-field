@@ -212,3 +212,9 @@ table.wx tr.crit td { background: rgba(255,20,147,.18); color: #ffd0e6; }
   background: #fff; color: #160403; font: 800 10px/15px var(--font); text-align: center; box-shadow: 0 0 0 1.5px var(--accent); }
 .rfw-banner:not(.hidden) ~ .coords { top: 88px; }
 .rfw-banner:not(.hidden) ~ .navbar { top: 86px; }
+
+/* ---------- live sharing */
+.room-card { padding: 12px; border-radius: 8px; border: 1px solid var(--accent); background: rgba(255,59,48,.06); }
+.room-name { font-size: 16px; font-weight: 700; letter-spacing: .5px; }
+.room-code { margin-top: 8px; font: 700 18px/1.2 var(--mono); letter-spacing: 1.5px; color: var(--accent-2); word-break: break-all; }
+#sync { cursor: default; }

@@ -1,16 +1,20 @@
 // Service worker: makes the app open instantly and the map draw with no signal.
 // Bump V together with the ?v= numbers in index.html on every release.
-const V = '8';
+const V = '10';
 const SHELL = 'fireline-shell-v' + V;
 const TILES = 'fireline-tiles';
 const SHELL_FILES = [
-  './', 'index.html', `styles.css?v=${V}`, `app.js?v=${V}`, `config.js?v=${V}`, `db.js?v=${V}`, `icon.svg?v=${V}`, 'manifest.webmanifest',
+  './', 'index.html', `styles.css?v=${V}`, `app.js?v=${V}`, `config.js?v=${V}`, `firebase-config.js?v=${V}`, `db.js?v=${V}`, `icon.svg?v=${V}`, 'manifest.webmanifest',
   'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css',
   'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js',
   // GeoPDF reader, so incident maps can be imported with no signal
   'https://unpkg.com/pdfjs-dist@3.11.174/build/pdf.min.js',
   'https://unpkg.com/pdfjs-dist@3.11.174/build/pdf.worker.min.js',
   'https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js',
+  // live sharing (Firebase), so a joined room keeps working offline
+  'https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js',
+  'https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js',
+  'https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js',
 ];
 const TILE_HOSTS = ['basemap.nationalmap.gov', 'server.arcgisonline.com', 'tile.opentopomap.org', 'tile.openstreetmap.org'];
 
@@ -45,7 +49,7 @@ self.addEventListener('fetch', (e) => {
   // Live data (ArcGIS REST, USGS elevation): always network; the app keeps its own offline copy.
   if (url.pathname.includes('/arcgis/rest/') || url.hostname === 'epqs.nationalmap.gov') return;
 
-  const isShell = url.origin === location.origin || url.hostname === 'unpkg.com';
+  const isShell = url.origin === location.origin || url.hostname === 'unpkg.com' || (url.hostname === 'www.gstatic.com' && url.pathname.startsWith('/firebasejs/'));
   if (!isShell) return;
 
   // App files: serve the saved copy instantly (works on no signal or weak "lie-fi"),

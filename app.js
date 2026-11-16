@@ -362,6 +362,7 @@ document.addEventListener('click', async (e) => {
     copyText(`${ddm(lat, lng)}  (${lat.toFixed(5)}, ${lng.toFixed(5)})`);
   } else if (del) {
     if (!confirm('Delete this feature?')) return;
+    const gone = S.features.find((f) => f.id === del.dataset.del); if (gone) unsyncFeature(gone);
     await DB.del('features', del.dataset.del);
     S.features = S.features.filter((f) => f.id !== del.dataset.del);
     map.closePopup(); renderMine(); toast('Deleted');
@@ -377,6 +378,7 @@ async function saveFeature(f) {
   const i = S.features.findIndex((x) => x.id === f.id);
   if (i >= 0) S.features[i] = f; else S.features.push(f);
   renderMine();
+  syncFeature(f);
   if ((f.kind === 'point' || f.kind === 'triage') && f.props.elevFt == null) fillElevation(f);
 }
 
@@ -398,6 +400,7 @@ async function fillElevation(f) {
   if (v == null) return;
   f.props.elevFt = v; f.props.elevSrc = 'USGS 3DEP';
   await DB.put('features', f);
+  if (f.room) syncFeature(f);
 }
 // Points dropped with no signal get their elevation once coverage returns. Phones don't always
 // announce "back online" reliably, so this also retries every 2 minutes while anything is pending.
@@ -842,6 +845,7 @@ function trackToLine() {
 function renderData(el) {
   const n = (k) => S.features.filter((f) => f.kind === k).length;
   el.append(h(`
+    ${sharingSection()}
     <h3>On this device</h3>
     <div class="row"><span class="grow">Points</span><b>${n('point')}</b></div>
     <div class="row"><span class="grow">Lines</span><b>${n('line')}</b></div>
@@ -888,6 +892,7 @@ function renderData(el) {
   $('#x-imp', el).onchange = importFile;
   $('#x-tiles', el).onclick = downloadTiles;
   $('#x-out', el).onclick = signOut;
+  wireSharing(el);
   $('#x-wipe', el).onclick = async () => {
     if (!confirm('Delete ALL collected features, triage and tracks on this device? Export first if you need them.')) return;
     await DB.clear('features'); await DB.clear('tracks'); S.features = []; S.track = null;
@@ -1413,7 +1418,8 @@ function incidentIcon(p) {
   return n ? L.divIcon({ className: 'fire-pin', html: FLAME + `<b class="note-badge">${n}</b>`, iconSize: [22, 22], iconAnchor: [11, 18] }) : fireIcon;
 }
 function refreshIncidentIcons() { G.incidents.eachLayer((l) => l.feature && l.setIcon(incidentIcon(l.feature.properties))); }
-function openIncidentNotes(key) {
+function openIncidentNotes(key, keepScroll) {
+  S.openNotesKey = key; const scroll = keepScroll ? $('#panel-body').scrollTop : 0;
   const f = (S.incidentsData?.gj.features || []).find((x) => incKey(x.properties) === key);
   const name = f?.properties.IncidentName || S.notes.find((n) => n.incident === key)?.incidentName || 'Incident';
   map.closePopup();
@@ -1432,7 +1438,8 @@ function openIncidentNotes(key) {
           ${n.photo ? `<img class="photo-prev" src="${n.photo}" alt="Note photo">` : ''}
           ${n.by === localStorage.getItem('by') ? `<button class="btn danger note-del" data-note-del="${n.id}">Delete</button>` : ''}
         </div>`).join('') || '<p class="hint">No notes yet. Be the first.</p>'}
-      <p class="hint">Notes are saved on this phone. Share them from Data ▸ Export ▸ “Incident notes”. Live sharing between phones comes with the online database.</p>`));
+      <p class="hint">${SYNC.room ? `Shared live with <b>${esc(SYNC.room.name)}</b>. New notes from your crew appear here automatically.` : 'Saved on this phone. Join a room (Data ▸ Live team sharing) to share notes live with your crew, or export them from Data ▸ Export ▸ “Incident notes”.'}</p>`));
+    if (scroll) $('#panel-body').scrollTop = scroll;
     let photo = '';
     $('#in-photo', el).onchange = async (e) => { const file = e.target.files[0]; if (!file) return; photo = await shrinkImage(file, 1000); const p = $('#in-prev', el); p.src = photo; p.classList.remove('hidden'); };
     $('#in-add', el).onclick = async () => {
@@ -1440,11 +1447,12 @@ function openIncidentNotes(key) {
       if (!text && !photo) return toast('Write a note or add a photo');
       const [lng, lat] = f ? f.geometry.coordinates : [null, null];
       const note = { id: uid(), incident: key, incidentName: name, lat, lng, at: Date.now(), by: localStorage.getItem('by') || '', text, photo };
-      await DB.put('notes', note); S.notes.push(note); refreshIncidentIcons();
+      await DB.put('notes', note); S.notes.push(note); syncNote(note); refreshIncidentIcons();
       toast('Note added'); openIncidentNotes(key);
     };
     el.querySelectorAll('[data-note-del]').forEach((b) => (b.onclick = async () => {
       if (!confirm('Delete this note?')) return;
+      const gone = S.notes.find((n) => n.id === b.dataset.noteDel); if (gone) unsyncNote(gone);
       await DB.del('notes', b.dataset.noteDel); S.notes = S.notes.filter((n) => n.id !== b.dataset.noteDel);
       refreshIncidentIcons(); openIncidentNotes(key);
     }));
@@ -1507,6 +1515,244 @@ function toTAK(feats, withTrack) {
 </MissionPackageManifest>` });
   return zipStore(files);
 }
+
+// ---------------------------------------------------------------- live team sharing (Firebase)
+// Phones join a "room" (an incident or crew) with a share code. Markers, lines, areas, triage and
+// incident notes sync live. Firestore's offline cache queues changes made with no signal and sends
+// them when coverage returns. Sign-in is anonymous per device; the person's name comes from crew sign-in.
+const FB_V = '10.14.1';
+const FB_URL = (m) => `https://www.gstatic.com/firebasejs/${FB_V}/firebase-${m}.js`;
+const SYNC = { fb: null, room: null, unsub: [], members: [], pending: false, fromCache: true, lastError: '' };
+
+async function fbInit() {
+  if (SYNC.fb) return SYNC.fb;
+  const cfg = window.FIRELINE_FIREBASE;
+  if (!cfg) throw new Error('Live sharing is not set up yet');
+  const [appM, authM, fs] = await Promise.all([import(FB_URL('app')), import(FB_URL('auth')), import(FB_URL('firestore'))]);
+  const app = appM.initializeApp(cfg);
+  const auth = authM.getAuth(app);
+  let db;
+  // Long polling: slower to set up than streaming in theory, but reliable on agency networks, proxies and
+  // flaky cell links, and avoids a slow first sync while the SDK probes the connection.
+  try { db = fs.initializeFirestore(app, { experimentalForceLongPolling: true, localCache: fs.persistentLocalCache({ tabManager: fs.persistentMultipleTabManager() }) }); }
+  catch { db = fs.getFirestore(app); }
+  await auth.authStateReady();
+  if (!auth.currentUser) await authM.signInAnonymously(auth);
+  SYNC.fb = { auth, db, fs, uid: auth.currentUser.uid };
+  return SYNC.fb;
+}
+const ROOM_ALPHA = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+function newRoomCode() {
+  const r = crypto.getRandomValues(new Uint8Array(16));
+  return [...r].map((b) => ROOM_ALPHA[b % ROOM_ALPHA.length]).join('');
+}
+const prettyCode = (c) => c.match(/.{1,4}/g).join('-');
+const cleanCode = (c) => String(c || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+const joinLink = (c) => `${location.origin}${location.pathname}?join=${c}`;
+const me = () => ({ name: S.session?.name || '', crew: S.session?.crew || '', by: localStorage.getItem('by') || '' });
+
+function featToDoc(f) {
+  return { kind: f.kind, category: f.category, geometry: JSON.stringify(f.geometry), props: f.props || {},
+    updatedAt: f.props?.updatedAt || f.props?.createdAt || Date.now(), updatedBy: SYNC.fb.uid, deviceBy: me().by };
+}
+function docToFeat(id, d) {
+  return { id, kind: d.kind, category: d.category, geometry: JSON.parse(d.geometry), props: d.props || {}, room: SYNC.room?.id };
+}
+function noteToDoc(n) { const { room, ...rest } = n; return { ...rest, updatedAt: n.at, updatedBy: SYNC.fb.uid }; }
+
+async function createRoom(name) {
+  const { db, fs, uid } = await fbInit();
+  const id = newRoomCode();
+  const batch = fs.writeBatch(db);
+  batch.set(fs.doc(db, 'rooms', id), { name, createdBy: uid, createdAt: fs.serverTimestamp(), creatorName: me().by });
+  batch.set(fs.doc(db, 'rooms', id, 'members', uid), { ...me(), joinedAt: fs.serverTimestamp() });
+  await batch.commit();
+  await activateRoom({ id, name, owner: true });
+  return id;
+}
+async function joinRoom(code) {
+  const id = cleanCode(code);
+  if (id.length < 12) throw new Error('That share code looks too short');
+  const { db, fs, uid } = await fbInit();
+  await fs.setDoc(fs.doc(db, 'rooms', id, 'members', uid), { ...me(), joinedAt: fs.serverTimestamp() });
+  const snap = await fs.getDoc(fs.doc(db, 'rooms', id));
+  if (!snap.exists()) { await fs.deleteDoc(fs.doc(db, 'rooms', id, 'members', uid)).catch(() => {}); throw new Error('No room with that code'); }
+  await activateRoom({ id, name: snap.data().name, owner: snap.data().createdBy === uid });
+}
+async function leaveRoom() {
+  if (!SYNC.room) return;
+  const { db, fs, uid } = SYNC.fb;
+  const id = SYNC.room.id;
+  stopRoom();
+  localStorage.removeItem('room');
+  fs.deleteDoc(fs.doc(db, 'rooms', id, 'members', uid)).catch(() => {});
+  // Shared items stay on this phone as your own copies.
+  for (const f of S.features) if (f.room === id) { delete f.room; DB.put('features', f); }
+  for (const n of S.notes) if (n.room === id) { delete n.room; DB.put('notes', n); }
+  updateSyncPill();
+}
+function stopRoom() { SYNC.unsub.forEach((u) => u()); SYNC.unsub = []; SYNC.room = null; SYNC.members = []; }
+
+async function activateRoom(room) {
+  const { db, fs } = await fbInit();
+  stopRoom();
+  SYNC.room = room; localStorage.setItem('room', JSON.stringify(room));
+  updateSyncPill();
+  const col = (c) => fs.collection(db, 'rooms', room.id, c);
+  const onErr = (err) => {
+    if (err.code === 'permission-denied' && SYNC.room?.id === room.id) {
+      // removed from the room (or it was deleted): stop syncing, keep local copies
+      toast(`You no longer have access to "${room.name}". Your copies stay on this phone.`, 6000);
+      leaveRoom(); return;
+    }
+    SYNC.lastError = err.message; updateSyncPill(); console.error('sync', err);
+  };
+
+  SYNC.unsub.push(fs.onSnapshot(col('features'), { includeMetadataChanges: true }, async (snap) => {
+    SYNC.pending = snap.metadata.hasPendingWrites; SYNC.fromCache = snap.metadata.fromCache; SYNC.lastError = '';
+    let changed = false;
+    for (const ch of snap.docChanges()) {
+      if (ch.type === 'removed') {
+        if (S.features.some((f) => f.id === ch.doc.id)) {
+          S.features = S.features.filter((f) => f.id !== ch.doc.id); await DB.del('features', ch.doc.id); changed = true;
+        }
+        continue;
+      }
+      const f = docToFeat(ch.doc.id, ch.doc.data());
+      const i = S.features.findIndex((x) => x.id === f.id);
+      const localT = i >= 0 ? (S.features[i].props.updatedAt || S.features[i].props.createdAt || 0) : -1;
+      if (i < 0 || (f.props.updatedAt || f.props.createdAt || 0) >= localT) {
+        if (i >= 0) S.features[i] = f; else S.features.push(f);
+        await DB.put('features', f); changed = true;
+      }
+    }
+    if (changed) { renderMine(); if (openKey === 'triage' || openKey === 'data') { const k = openKey; openKey = null; openPanel(k); } }
+    updateSyncPill();
+  }, onErr));
+
+  SYNC.unsub.push(fs.onSnapshot(col('notes'), async (snap) => {
+    let changed = false;
+    for (const ch of snap.docChanges()) {
+      if (ch.type === 'removed') { S.notes = S.notes.filter((n) => n.id !== ch.doc.id); await DB.del('notes', ch.doc.id); changed = true; continue; }
+      const { updatedAt, updatedBy, ...n } = ch.doc.data();
+      const note = { ...n, id: ch.doc.id, room: room.id };
+      const i = S.notes.findIndex((x) => x.id === note.id);
+      if (i >= 0) S.notes[i] = note; else S.notes.push(note);
+      await DB.put('notes', note); changed = true;
+    }
+    if (changed) { refreshIncidentIcons(); if (S.openNotesKey && openKey === '__form') openIncidentNotes(S.openNotesKey, true); }
+  }, onErr));
+
+  SYNC.unsub.push(fs.onSnapshot(col('members'), (snap) => {
+    SYNC.members = snap.docs.map((d) => ({ uid: d.id, ...d.data() }));
+    updateSyncPill();
+    if (openKey === 'data') { openKey = null; openPanel('data'); }
+  }, onErr));
+}
+
+// Called after local saves/deletes; Firestore queues these when offline.
+function syncFeature(f) {
+  if (!SYNC.room || !SYNC.fb) return;
+  if (f.room && f.room !== SYNC.room.id) return; // belongs to another room
+  f.room = SYNC.room.id; DB.put('features', f);
+  const { db, fs } = SYNC.fb;
+  fs.setDoc(fs.doc(db, 'rooms', SYNC.room.id, 'features', f.id), featToDoc(f)).catch((e) => { SYNC.lastError = e.message; updateSyncPill(); });
+}
+function unsyncFeature(f) {
+  if (!SYNC.room || !SYNC.fb || f.room !== SYNC.room.id) return;
+  const { db, fs } = SYNC.fb;
+  fs.deleteDoc(fs.doc(db, 'rooms', SYNC.room.id, 'features', f.id)).catch(() => {});
+}
+function syncNote(n) {
+  if (!SYNC.room || !SYNC.fb) return;
+  n.room = SYNC.room.id; DB.put('notes', n);
+  const { db, fs } = SYNC.fb;
+  fs.setDoc(fs.doc(db, 'rooms', SYNC.room.id, 'notes', n.id), noteToDoc(n)).catch((e) => { SYNC.lastError = e.message; updateSyncPill(); });
+}
+function unsyncNote(n) {
+  if (!SYNC.room || !SYNC.fb || n.room !== SYNC.room.id) return;
+  const { db, fs } = SYNC.fb;
+  fs.deleteDoc(fs.doc(db, 'rooms', SYNC.room.id, 'notes', n.id)).catch(() => {});
+}
+async function shareExisting() {
+  const fs_ = S.features.filter((f) => !f.room), ns = S.notes.filter((n) => !n.room);
+  if (!fs_.length && !ns.length) return toast('Nothing new to share');
+  if (!confirm(`Share ${fs_.length} features and ${ns.length} incident notes from this phone with "${SYNC.room.name}"?`)) return;
+  fs_.forEach(syncFeature); ns.forEach(syncNote);
+  toast(`Shared ${fs_.length + ns.length} items`);
+}
+
+function updateSyncPill() {
+  const el = $('#sync'); if (!el) return;
+  if (!SYNC.room) { el.classList.add('hidden'); return; }
+  el.classList.remove('hidden');
+  const n = SYNC.members.length;
+  if (SYNC.lastError) { el.className = 'pill bad'; el.textContent = 'SYNC ERROR'; el.title = SYNC.lastError; return; }
+  if (SYNC.pending || !navigator.onLine) { el.className = 'pill off'; el.textContent = `⇅ QUEUED${n ? ' · ' + n : ''}`; el.title = 'Changes are saved and will sync when you have signal'; return; }
+  el.className = 'pill'; el.textContent = `⇅ LIVE${n ? ' · ' + n : ''}`; el.title = `Sharing with ${SYNC.room.name}`;
+}
+
+function sharingSection() {
+  if (!window.FIRELINE_FIREBASE) {
+    return `<h3>Live team sharing</h3><p class="hint">Not set up yet. Your admin needs to add the Firebase settings (see README).</p>`;
+  }
+  if (!SYNC.room) {
+    return `<h3>Live team sharing</h3>
+      <p class="hint">Join an incident or crew room to see each other's markers, lines, triage and incident notes live. Works offline: changes sync when you get signal.</p>
+      <label class="f">Join with a share code<input id="sh-code" placeholder="e.g. K7QM-3XRA-…" autocapitalize="characters"></label>
+      <div class="btns"><button class="btn primary" id="sh-join">Join room</button></div>
+      <label class="f">…or start a new room<input id="sh-name" placeholder="e.g. Sawtooth Fire: Div A"></label>
+      <div class="btns"><button class="btn" id="sh-new">Create room</button></div>
+      <div class="hint" id="sh-msg"></div>`;
+  }
+  const r = SYNC.room;
+  return `<h3>Live team sharing</h3>
+    <div class="room-card">
+      <div class="room-name">${esc(r.name)}</div>
+      <div class="hint">${SYNC.pending ? 'Changes queued, will sync with signal' : SYNC.fromCache ? 'Connecting…' : 'Live, all changes synced'}</div>
+      <div class="room-code">${esc(prettyCode(r.id))}</div>
+      <div class="btns"><button class="btn primary" id="sh-share">Invite crew…</button><button class="btn" id="sh-copy">${ICON.copy} Copy code</button></div>
+    </div>
+    <h3>In this room: ${SYNC.members.length}</h3>
+    ${SYNC.members.map((m) => `<div class="row"><span class="grow">${esc(m.name || 'Unknown')}<small>${esc(m.crew || '')}${m.uid === SYNC.fb?.uid ? ' · you' : ''}</small></span>
+      ${r.owner && m.uid !== SYNC.fb?.uid ? `<button class="btn danger" data-sh-kick="${m.uid}">Remove</button>` : ''}</div>`).join('')}
+    <div class="btns"><button class="btn" id="sh-push">Share my existing data</button><button class="btn danger" id="sh-leave">Leave room</button></div>
+    <p class="hint">Anyone with the code can join, so share it only with your crew. Leaving keeps a copy of everything on this phone.</p>`;
+}
+function wireSharing(el) {
+  const msg = (t) => { const m = $('#sh-msg', el); if (m) m.textContent = t; };
+  const busy = async (fn) => { try { msg('Working…'); await fn(); msg(''); openKey = null; openPanel('data'); } catch (e) { msg(e.message); toast(e.message, 5000); } };
+  const j = $('#sh-join', el); if (j) j.onclick = () => busy(async () => { await joinRoom($('#sh-code', el).value); toast(`Joined ${SYNC.room.name}`); });
+  const n = $('#sh-new', el); if (n) n.onclick = () => busy(async () => {
+    const name = $('#sh-name', el).value.trim(); if (!name) throw new Error('Give the room a name');
+    await createRoom(name); toast('Room created. Invite your crew.');
+  });
+  const share = $('#sh-share', el); if (share) share.onclick = async () => {
+    const text = `Join "${SYNC.room.name}" on FireLine Field: ${joinLink(SYNC.room.id)}  (code ${prettyCode(SYNC.room.id)})`;
+    if (navigator.share) { try { await navigator.share({ title: 'FireLine Field room', text }); } catch { /* cancelled */ } } else copyText(text);
+  };
+  const cp = $('#sh-copy', el); if (cp) cp.onclick = () => copyText(prettyCode(SYNC.room.id));
+  const push = $('#sh-push', el); if (push) push.onclick = shareExisting;
+  const leave = $('#sh-leave', el); if (leave) leave.onclick = async () => { if (confirm(`Leave "${SYNC.room.name}"?`)) { await leaveRoom(); openKey = null; openPanel('data'); } };
+  el.querySelectorAll('[data-sh-kick]').forEach((b) => (b.onclick = async () => {
+    if (!confirm('Remove this person from the room?')) return;
+    const { db, fs } = SYNC.fb; await fs.deleteDoc(fs.doc(db, 'rooms', SYNC.room.id, 'members', b.dataset.shKick)).catch((e) => toast(e.message));
+  }));
+}
+async function initSharing() {
+  if (!window.FIRELINE_FIREBASE) return;
+  const join = new URLSearchParams(location.search).get('join');
+  try {
+    if (join) {
+      history.replaceState(null, '', location.pathname);
+      if (!SYNC.room || SYNC.room.id !== cleanCode(join)) { await joinRoom(join); toast(`Joined ${SYNC.room.name}`, 4000); }
+      return;
+    }
+    const saved = JSON.parse(localStorage.getItem('room') || 'null');
+    if (saved) await activateRoom(saved);
+  } catch (e) { console.error('sharing', e); toast('Live sharing: ' + e.message, 5000); }
+}
+addEventListener('online', updateSyncPill); addEventListener('offline', updateSyncPill);
 
 // ---------------------------------------------------------------- misc wiring
 map.on('mousemove', (e) => { $('#coords').textContent = ddm(e.latlng.lat, e.latlng.lng); });
@@ -1591,6 +1837,7 @@ async function init() {
   renderMine(); renderTrack(); setNet(); refreshNifc();
   loadMaps().catch((e) => console.error('maps', e));
   backfillElevations();
+  initSharing();
   if ('serviceWorker' in navigator && location.protocol.startsWith('http')) navigator.serviceWorker.register('sw.js').catch(() => {});
 }
 init();

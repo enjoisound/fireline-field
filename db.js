@@ -2,7 +2,7 @@
 // so it keeps working with no signal.
 const DB = (() => {
   const NAME = 'fireline-field';
-  const VERSION = 2;
+  const VERSION = 3;
   let dbp;
 
   function open() {
@@ -15,6 +15,7 @@ const DB = (() => {
         if (!db.objectStoreNames.contains('tracks')) db.createObjectStore('tracks', { keyPath: 'id' });
         if (!db.objectStoreNames.contains('kv')) db.createObjectStore('kv');
         if (!db.objectStoreNames.contains('maps')) db.createObjectStore('maps', { keyPath: 'id' });
+        if (!db.objectStoreNames.contains('notes')) db.createObjectStore('notes', { keyPath: 'id' });
       };
       req.onsuccess = () => resolve(req.result);
       req.onerror = () => reject(req.error);

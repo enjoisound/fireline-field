@@ -16,6 +16,8 @@ const ICON = {
   intel: svg('<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/><circle cx="12" cy="12" r="7.5"/>'),
   copy: svg('<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h8"/>'),
   night: svg('<path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z"/>'),
+  note: svg('<path d="M4 4h16v12H8l-4 4z"/><path d="M8 9h8M8 12h5"/>'),
+  wx: svg('<path d="M7 18a4 4 0 1 1 .9-7.9A6 6 0 0 1 19 12a3 3 0 0 1-1 5.9z"/>'),
   pdf: svg('<path d="M6 2h9l5 5v15H6z"/><path d="M14 2v6h6"/><path d="M9 14h6M9 17h4"/>'),
 };
 
@@ -70,26 +72,40 @@ const TRIAGE_STATUS = ['Not Threatened', 'Threatened', 'Damaged', 'Destroyed', '
 
 // Public NIFC / Esri ArcGIS REST services (no login needed).
 const SVC = {
+  wwa: 'https://mapservices.weather.noaa.gov/eventdriven/rest/services/WWA/watch_warn_adv/MapServer/1/query',
   incidents: 'https://services3.arcgis.com/T4QMspbfLg3qTGWY/arcgis/rest/services/WFIGS_Incident_Locations_Current/FeatureServer/0/query',
   perimeters: 'https://services3.arcgis.com/T4QMspbfLg3qTGWY/arcgis/rest/services/WFIGS_Interagency_Perimeters_Current/FeatureServer/0/query',
   viirs: 'https://services9.arcgis.com/RHVPKKiFTONKtxq3/arcgis/rest/services/Satellite_VIIRS_Thermal_Hotspots_and_Fire_Activity/FeatureServer/0/query',
 };
 
+const esriTile = (svc, opts = {}) => L.tileLayer(`https://server.arcgisonline.com/ArcGIS/rest/services/${svc}/MapServer/tile/{z}/{y}/{x}`,
+  { maxZoom: 19, maxNativeZoom: 19, attribution: 'Tiles © Esri', ...opts });
+const usgsTile = (svc, opts = {}) => L.tileLayer(`https://basemap.nationalmap.gov/arcgis/rest/services/${svc}/MapServer/tile/{z}/{y}/{x}`,
+  { maxZoom: 19, maxNativeZoom: 16, attribution: 'USGS The National Map', offlineOK: true, ...opts });
+// offlineOK: public-domain sources whose terms allow downloading areas for offline use.
 const BASEMAPS = {
-  'Topo (Esri)': L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}',
-    { maxZoom: 19, maxNativeZoom: 19, attribution: 'Tiles © Esri' }),
-  'Imagery (Esri)': L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-    { maxZoom: 19, maxNativeZoom: 19, attribution: 'Tiles © Esri, Maxar, Earthstar' }),
+  'USGS Topo': usgsTile('USGSTopo'),
+  'Satellite + roads & labels': L.layerGroup([
+    esriTile('World_Imagery', { attribution: 'Tiles © Esri, Maxar, Earthstar Geographics' }),
+    esriTile('Reference/World_Transportation', { opacity: 0.9 }),
+    esriTile('Reference/World_Boundaries_and_Places'),
+  ]),
+  'Satellite (clean)': esriTile('World_Imagery', { attribution: 'Tiles © Esri, Maxar, Earthstar Geographics' }),
+  'USGS Shaded relief + hydro': L.layerGroup([usgsTile('USGSShadedReliefOnly'), usgsTile('USGSHydroCached', { opacity: 0.9 })]),
+  'Esri Topo': esriTile('World_Topo_Map'),
   'OpenTopoMap': L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png',
     { maxZoom: 17, attribution: '© OpenStreetMap contributors, SRTM | © OpenTopoMap (CC-BY-SA)' }),
   'Streets (OSM)': L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',
     { maxZoom: 19, attribution: '© OpenStreetMap contributors' }),
 };
+const baseTiles = (name) => { const l = BASEMAPS[name]; return l instanceof L.TileLayer ? [l] : l.getLayers(); };
 
 // ---------------------------------------------------------------- state
 const S = {
-  basemap: 'Topo (Esri)',
-  layersOn: { incidents: true, perimeters: true, viirs: false, mine: true, triage: true, track: true },
+  basemap: 'USGS Topo',
+  layersOn: { redflag: true, incidents: true, perimeters: true, viirs: false, mine: true, triage: true, track: true },
+  rfwData: null,
+  notes: [],              // incident notes & photos
   features: [],           // my collected features (incl. triage)
   track: null,            // { id, points:[[lat,lng,t]] }
   tracking: false,
@@ -113,10 +129,15 @@ L.control.scale({ imperial: true, metric: true }).addTo(map);
 const G = {
   perimeters: L.geoJSON(null, { style: () => ({ color: '#ff2a1a', weight: 2, fillColor: '#ff2a1a', fillOpacity: 0.15 }),
     onEachFeature: (f, l) => l.bindPopup(() => nifcPopup(f.properties, 'perimeter')) }),
+  redflag: L.geoJSON(null, {
+    style: (f) => { const c = RFW_COLORS[f.properties.prod_type] || '#ff1493'; return { color: c, weight: 2, fillColor: c, fillOpacity: 0.18, dashArray: f.properties.prod_type === 'Red Flag Warning' ? null : '6 4' }; },
+    onEachFeature: (f, l) => l.bindPopup(() => wwaPopup(f.properties)) }),
   incidents: L.geoJSON(null, {
-    pointToLayer: (f, ll) => L.marker(ll, { icon: fireIcon }),
-    onEachFeature: (f, l) => l.bindPopup(() => { const [lng, lat] = f.geometry.coordinates;
-      return nifcPopup(f.properties, 'incident') + `<div class="btns">${ptButtons(lat, lng, f.properties.IncidentName || 'Incident')}</div>`; }) }),
+    pointToLayer: (f, ll) => L.marker(ll, { icon: incidentIcon(f.properties) }),
+    onEachFeature: (f, l) => l.bindPopup(() => { const [lng, lat] = f.geometry.coordinates; const n = noteCount(incKey(f.properties));
+      return nifcPopup(f.properties, 'incident') + `<div class="btns">
+        <button class="btn primary" data-inc-notes="${esc(incKey(f.properties))}">${ICON.note} Notes & photos${n ? ` (${n})` : ''}</button>
+        ${ptButtons(lat, lng, f.properties.IncidentName || 'Incident')}</div>`; }) }),
   viirs: L.geoJSON(null, {
     pointToLayer: (f, ll) => L.circleMarker(ll, { radius: 4, color: '#ffd23f', weight: 1, fillColor: '#ff3b1a', fillOpacity: 0.9 }),
     onEachFeature: (f, l) => l.bindPopup(() => nifcPopup(f.properties, 'viirs')) }),
@@ -129,7 +150,7 @@ const G = {
   me: L.layerGroup().addTo(map),
 };
 // stacking order: perimeters under everything
-['perimeters', 'viirs', 'incidents', 'track', 'mine', 'triage'].forEach((k) => S.layersOn[k] && G[k].addTo(map));
+['redflag', 'perimeters', 'viirs', 'incidents', 'track', 'mine', 'triage'].forEach((k) => S.layersOn[k] && G[k].addTo(map));
 
 // ---------------------------------------------------------------- helpers
 const $ = (s, r = document) => r.querySelector(s);
@@ -243,6 +264,7 @@ function refreshNifc() {
   clearTimeout(loadTimer);
   loadTimer = setTimeout(async () => {
     const z = map.getZoom();
+    if (S.layersOn.redflag && (!S.rfwAt || Date.now() - S.rfwAt > 600000)) { S.rfwAt = Date.now(); refreshRedFlags(); }
     if (S.layersOn.incidents) {
       // Fire-only, nationwide is small enough; refresh at most every 5 min.
       if (!S.incidentsData || Date.now() - S.incidentsData.t > 300000) {
@@ -327,7 +349,12 @@ function renderMine() {
 document.addEventListener('click', async (e) => {
   const del = e.target.closest('[data-del]'); const ed = e.target.closest('[data-edit]');
   const nav = e.target.closest('[data-nav]'); const cp = e.target.closest('[data-copy]');
-  if (nav) {
+  const wx = e.target.closest('[data-wx]'); const inc = e.target.closest('[data-inc-notes]');
+  if (wx) {
+    const [lat, lng] = wx.dataset.wx.split(',').map(Number); map.closePopup(); showWeather(lat, lng, wx.dataset.name);
+  } else if (inc) {
+    openIncidentNotes(inc.dataset.incNotes);
+  } else if (nav) {
     const [lat, lng] = nav.dataset.nav.split(',').map(Number);
     map.closePopup(); startNav({ lat, lng, name: nav.dataset.name || 'Waypoint', elevFt: nav.dataset.elev ? +nav.dataset.elev : null });
   } else if (cp) {
@@ -389,7 +416,8 @@ async function backfillElevations() {
 setInterval(backfillElevations, 120000);
 function ptButtons(lat, lng, name, elevFt) {
   return `<button class="btn" data-nav="${lat},${lng}" data-name="${esc(name)}" data-elev="${elevFt ?? ''}">${ICON.nav} Navigate</button>
-    <button class="btn" data-copy="${lat},${lng}">${ICON.copy} Copy</button>`;
+    <button class="btn" data-copy="${lat},${lng}">${ICON.copy} Copy</button>
+    <button class="btn" data-wx="${lat},${lng}" data-name="${esc(name)}">${ICON.wx} Weather</button>`;
 }
 
 // ---------------------------------------------------------------- drawing
@@ -513,6 +541,7 @@ function renderLayers(el) {
         <button class="btn danger" data-gp-del="${m.id}" aria-label="Delete map">✕</button>
       </div>`).join('') || '<p class="hint">No maps imported yet.</p>'}</div>
     <h3>NIFC live layers (public)</h3>
+    ${layerRow('redflag', 'Red flag warnings & fire weather watches', 'National Weather Service · nationwide', '<span class="swatch" style="background:#ff149355;border-color:#ff1493"></span>')}
     ${layerRow('incidents', 'Current incidents', 'WFIGS incident locations (IRWIN)', `<span class="fire-pin">${FLAME}</span>`)}
     ${layerRow('perimeters', 'Current fire perimeters', 'WFIGS interagency perimeters', '<span class="swatch" style="background:#ff2a1a55;border-color:#ff2a1a"></span>')}
     ${layerRow('viirs', 'VIIRS / MODIS hotspots (48 h)', 'Satellite thermal detections · zoom in to see', '<span class="swatch dot" style="background:#ff3b1a"></span>')}
@@ -531,6 +560,7 @@ function renderLayers(el) {
     const k = cb.dataset.layer; S.layersOn[k] = cb.checked;
     cb.checked ? G[k].addTo(map) : map.removeLayer(G[k]);
     if (k === 'perimeters') G.perimeters.bringToBack();
+    if (k === 'redflag') { S.rfwAt = 0; if (cb.checked) G.redflag.bringToBack(); }
     saveSettings(); if (cb.checked) refreshNifc();
     if (k === 'viirs' && cb.checked && map.getZoom() < 6) toast('Zoom in (level 6+) to load hotspots');
   }));
@@ -542,7 +572,8 @@ function renderLayers(el) {
   el.querySelectorAll('[data-gp-del]').forEach((b) => (b.onclick = () => deleteMap(b.dataset.gpDel)));
 }
 function setBasemap(name) {
-  map.removeLayer(BASEMAPS[S.basemap]); S.basemap = name; BASEMAPS[name].addTo(map); BASEMAPS[name].bringToBack(); saveSettings();
+  map.removeLayer(BASEMAPS[S.basemap]); S.basemap = name; BASEMAPS[name].addTo(map);
+  baseTiles(name).forEach((l, i) => l.setZIndex(i)); saveSettings();
 }
 
 // ---- Collect
@@ -676,6 +707,7 @@ function renderTools(el) {
       <button class="btn ${S.watchId != null ? 'primary' : ''}" id="t-gps">${S.watchId != null ? 'GPS on' : 'Turn on GPS'}</button>
       <button class="btn" id="t-center">Center on me</button>
       <button class="btn" id="t-copyme">${ICON.copy} Copy</button>
+      <button class="btn" id="t-wx">${ICON.wx} Weather here</button>
     </div>
     <div id="t-fix" class="hint" style="margin-top:8px">${S.me ? fixText() : 'No fix yet.'}</div>
     <h3>Measure</h3>
@@ -695,6 +727,7 @@ function renderTools(el) {
   $('#t-decl', el).onchange = (e) => { localStorage.setItem('decl', e.target.value || '0'); updateNav(); };
   $('#t-gps', el).onclick = () => { S.watchId != null ? stopGps() : startGps(); openKey = null; openPanel('tools'); };
   $('#t-center', el).onclick = () => { if (S.me) map.setView(S.me, Math.max(map.getZoom(), 15)); else { startGps(); toast('Getting a fix…'); } };
+  $('#t-wx', el).onclick = () => { const c = S.me || map.getCenter(); if (!S.me) toast('No GPS fix: showing weather for the map center'); showWeather(c.lat, c.lng, S.me ? 'My location' : 'Map center'); };
   $('#t-copyme', el).onclick = () => (S.me ? copyText(`${ddm(S.me.lat, S.me.lng)}  (${S.me.lat.toFixed(5)}, ${S.me.lng.toFixed(5)})`) : toast('No GPS fix yet'));
   $('#t-track', el).onclick = () => { S.tracking ? stopTracking() : startTracking(); openKey = null; openPanel('tools'); };
   $('#t-track2line', el).onclick = trackToLine;
@@ -768,7 +801,7 @@ function onFix(pos) {
   L.marker([lat, lng], { icon: L.divIcon({ className: 'me-dot', iconSize: [16, 16] }), interactive: false }).addTo(G.me);
   if (firstFix) { firstFix = false; map.setView([lat, lng], Math.max(map.getZoom(), 14)); }
   const fx = $('#t-fix'); if (fx) fx.innerHTML = fixText();
-  refreshGround(); updateNav();
+  refreshGround(); updateNav(); checkRfwBanner();
   if (S.tracking && acc < 50) {
     const last = S.track.points[S.track.points.length - 1];
     if (!last || dist({ lat: last[0], lng: last[1] }, S.me) > 5) {
@@ -821,15 +854,17 @@ function renderData(el) {
       <option value="gpx">GPX: handheld GPS units (waypoints & tracks)</option>
       <option value="geojson">GeoJSON: ArcGIS Online/Pro, QGIS, NIFS upload</option>
       <option value="csv">CSV: spreadsheet of points & triage</option>
+      <option value="tak">TAK data package: ATAK, iTAK, WinTAK</option>
     </select></label>
-    <div class="radios" style="margin-top:8px"><label><input type="checkbox" id="x-trk" ${S.track?.points.length > 1 ? 'checked' : ''}> Include my GPS track (KML/GPX)</label></div>
+    <div class="radios" style="margin-top:8px"><label><input type="checkbox" id="x-trk" ${S.track?.points.length > 1 ? 'checked' : ''}> Include my GPS track (KML/GPX/TAK)</label></div>
+    <p class="hint">TAK: in ATAK/iTAK use Import ▸ Local storage (or open the .zip from Files/messages). Points arrive as TAK markers, lines and areas as an overlay.</p>
     <div class="btns">
       <button class="btn primary" id="x-dl">Download</button>
       <button class="btn" id="x-share">Share…</button>
       <label class="btn">Import GeoJSON<input type="file" id="x-imp" accept=".geojson,.json,application/geo+json" hidden></label>
     </div>
     <h3>Offline maps</h3>
-    <p class="hint">Downloads basemap tiles for the area on screen (this zoom + 3 more levels) so the map works with no signal. Last-loaded NIFC layers are also kept for offline viewing.</p>
+    <p class="hint">Downloads the free USGS map for the area on screen (this zoom + 3 more levels) so it works with no signal. Areas you've already looked at on any basemap are also kept. Last-loaded fire layers and weather stay available offline too.</p>
     <button class="btn block" id="x-tiles">Download this area (${S.basemap})</button>
     <div class="hint" id="x-prog"></div>
     <h3>Signed in</h3>
@@ -860,8 +895,8 @@ function renderData(el) {
   };
 }
 const stamp = () => new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-');
-function toGeoJSON() {
-  return { type: 'FeatureCollection', features: S.features.map((f) => ({ type: 'Feature', id: f.id, geometry: f.geometry,
+function toGeoJSON(list = S.features) {
+  return { type: 'FeatureCollection', features: list.map((f) => ({ type: 'Feature', id: f.id, geometry: f.geometry,
     properties: { FeatureCategory: f.category, Kind: f.kind, ...Object.fromEntries(Object.entries(f.props).map(([k, v]) => [k, Array.isArray(v) ? v.join('; ') : v])),
       CreateDate: f.props.createdAt ? new Date(f.props.createdAt).toISOString() : null } })) };
 }
@@ -889,13 +924,18 @@ async function importFile(e) {
 }
 
 async function downloadTiles() {
-  const layer = BASEMAPS[S.basemap];
-  const b = map.getBounds(), z0 = map.getZoom(), zMax = Math.min(z0 + 3, layer.options.maxNativeZoom || layer.options.maxZoom);
-  const urls = [];
-  for (let z = z0; z <= zMax; z++) {
-    const nw = map.project(b.getNorthWest(), z).divideBy(256).floor(), se = map.project(b.getSouthEast(), z).divideBy(256).floor();
-    for (let x = nw.x; x <= se.x; x++) for (let y = nw.y; y <= se.y; y++) {
-      urls.push(L.Util.template(layer._url, { s: 'abc'[(x + y) % 3], z, x, y, r: '' }));
+  const layers = baseTiles(S.basemap);
+  if (!layers.every((l) => l.options.offlineOK)) {
+    return toast('Offline downloads use the free USGS maps. Switch the basemap to “USGS Topo” or “USGS Shaded relief” (Maps tab) and try again.', 6000);
+  }
+  const b = map.getBounds(), z0 = Math.min(map.getZoom(), 16), urls = [];
+  for (const layer of layers) {
+    const zMax = Math.min(z0 + 3, layer.options.maxNativeZoom || layer.options.maxZoom);
+    for (let z = z0; z <= zMax; z++) {
+      const nw = map.project(b.getNorthWest(), z).divideBy(256).floor(), se = map.project(b.getSouthEast(), z).divideBy(256).floor();
+      for (let x = nw.x; x <= se.x; x++) for (let y = nw.y; y <= se.y; y++) {
+        urls.push(L.Util.template(layer._url, { s: 'abc'[(x + y) % 3], z, x, y, r: '' }));
+      }
     }
   }
   if (urls.length > 2500) return toast(`That's ${urls.length} tiles — zoom in further first (max 2500)`, 4000);
@@ -1186,12 +1226,13 @@ async function loadMaps() {
 
 // ---------------------------------------------------------------- export (GeoJSON / KML / GPX / CSV)
 function exportChoices() {
-  const out = [['all', 'All my data'], ['kind:point', 'Points'], ['kind:line', 'Lines'], ['kind:polygon', 'Polygons'], ['kind:triage', 'Structure triage']];
+  const out = [['all', 'All my data'], ['kind:point', 'Points'], ['kind:line', 'Lines'], ['kind:polygon', 'Polygons'], ['kind:triage', 'Structure triage'], ['notes', 'Incident notes']];
   [...new Set(S.features.filter((f) => f.kind !== 'triage').map((f) => f.category))].sort().forEach((c) => out.push(['cat:' + c, '• ' + c]));
   return out;
 }
 function pickFeatures(what) {
   if (what === 'all') return S.features;
+  if (what === 'notes') return notesAsFeatures();
   const [k, v] = [what.slice(0, what.indexOf(':')), what.slice(what.indexOf(':') + 1)];
   return S.features.filter((f) => (k === 'kind' ? f.kind === v : f.category === v));
 }
@@ -1250,11 +1291,12 @@ function toCSV(feats) {
 }
 function buildExport(fmt, what, withTrack) {
   const feats = pickFeatures(what);
-  const base = `fireline-${what === 'all' ? 'all' : what.split(':')[1].toLowerCase().replace(/[^a-z0-9]+/g, '-')}-${stamp()}`;
+  const base = `fireline-${what === 'all' || what === 'notes' ? what : what.split(':')[1].toLowerCase().replace(/[^a-z0-9]+/g, '-')}-${stamp()}`;
+  if (fmt === 'tak') return { name: base + '-tak.zip', type: 'application/zip', text: toTAK(feats, withTrack), n: feats.length };
   if (fmt === 'kml') return { name: base + '.kml', type: 'application/vnd.google-earth.kml+xml', text: toKML(feats, withTrack), n: feats.length };
   if (fmt === 'gpx') return { name: base + '.gpx', type: 'application/gpx+xml', text: toGPX(feats, withTrack), n: feats.length };
   if (fmt === 'csv') return { name: base + '.csv', type: 'text/csv', text: toCSV(feats), n: feats.filter((f) => f.geometry.type === 'Point').length };
-  const gj = toGeoJSON(); gj.features = gj.features.filter((x) => feats.some((f) => f.id === x.id));
+  const gj = toGeoJSON(feats);
   return { name: base + '.geojson', type: 'application/geo+json', text: JSON.stringify(gj, null, 1), n: feats.length };
 }
 
@@ -1266,6 +1308,205 @@ function setNight(on) {
   document.querySelector('meta[name=theme-color]').content = on ? '#000000' : '#0a0606';
 }
 $('#night-btn').onclick = () => setNight(!document.documentElement.classList.contains('night'));
+
+// ---------------------------------------------------------------- weather (NWS, public domain)
+const RFW_TYPES = ['Red Flag Warning', 'Fire Weather Watch', 'Extreme Fire Danger', 'Fire Warning'];
+const RFW_COLORS = { 'Red Flag Warning': '#ff1493', 'Fire Weather Watch': '#ffb347', 'Extreme Fire Danger': '#e9967a', 'Fire Warning': '#a0522d' };
+// Test hook: ?wxtest adds wind alerts so the layer can be checked when no red flags are active.
+if (/[?&]wxtest/.test(location.search)) RFW_TYPES.push('Wind Advisory', 'High Wind Warning');
+
+function inRing(pt, ring) { // ray casting, ring = [[lng,lat],...]
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const [xi, yi] = ring[i], [xj, yj] = ring[j];
+    if ((yi > pt[1]) !== (yj > pt[1]) && pt[0] < ((xj - xi) * (pt[1] - yi)) / (yj - yi) + xi) inside = !inside;
+  }
+  return inside;
+}
+function inGeom(pt, g) {
+  if (!g) return false;
+  const polys = g.type === 'Polygon' ? [g.coordinates] : g.type === 'MultiPolygon' ? g.coordinates : [];
+  return polys.some((p) => inRing(pt, p[0]) && !p.slice(1).some((hole) => inRing(pt, hole)));
+}
+function rfwAt(lat, lng) {
+  return (S.rfwData?.features || []).filter((f) => inGeom([lng, lat], f.geometry)).map((f) => f.properties.prod_type);
+}
+function checkRfwBanner() {
+  const el = $('#rfw-banner'); if (!el) return;
+  const hits = S.me ? [...new Set(rfwAt(S.me.lat, S.me.lng))] : [];
+  el.classList.toggle('hidden', !hits.length);
+  if (hits.length) el.textContent = '⚠ ' + hits.join(' · ').toUpperCase() + ' AT YOUR LOCATION';
+}
+async function refreshRedFlags() {
+  const where = `prod_type IN (${RFW_TYPES.map((t) => `'${t}'`).join(',')})`;
+  const gj = await fetchLayer('red flag warnings', SVC.wwa, new URLSearchParams({ where, outFields: 'prod_type,issuance,expiration,ends,url,wfo', f: 'geojson',
+    outSR: '4326', geometryPrecision: '4', maxAllowableOffset: '0.005', resultRecordCount: '2000' }));
+  if (!gj) return;
+  S.rfwData = gj; G.redflag.clearLayers().addData(gj); checkRfwBanner();
+}
+function wwaPopup(p) {
+  const t = (v) => (v && v.trim() ? new Date(v).toLocaleString() : '');
+  return `<h4>${esc(p.prod_type)}</h4><table>
+    <tr><td>Issued</td><td>${esc(t(p.issuance))}</td></tr>
+    <tr><td>Until</td><td>${esc(t(p.ends) || t(p.expiration))}</td></tr>
+    <tr><td>Office</td><td>NWS ${esc(p.wfo)}</td></tr></table>
+    ${p.url ? `<div class="btns"><a class="btn" href="${esc(p.url)}" target="_blank" rel="noopener">Full NWS text</a></div>` : ''}`;
+}
+
+const dirs16 = (d) => CARD[Math.round(((d % 360) + 360) % 360 / 22.5) % 16];
+async function getWeather(lat, lng) {
+  const key = 'wx:' + lat.toFixed(2) + ',' + lng.toFixed(2);
+  try {
+    const opt = { signal: timeoutSignal(20000), headers: { Accept: 'application/geo+json' } };
+    const pt = await (await fetch(`https://api.weather.gov/points/${lat.toFixed(4)},${lng.toFixed(4)}`, opt)).json();
+    if (!pt.properties) throw new Error(pt.detail || 'Outside NWS coverage (US only)');
+    const [hourly, daily, alerts] = await Promise.all([
+      fetch(pt.properties.forecastHourly, opt).then((r) => r.json()),
+      fetch(pt.properties.forecast, opt).then((r) => r.json()),
+      fetch(`https://api.weather.gov/alerts/active?point=${lat.toFixed(4)},${lng.toFixed(4)}`, opt).then((r) => r.json()).catch(() => ({ features: [] })),
+    ]);
+    const wx = {
+      at: Date.now(), place: [pt.properties.relativeLocation?.properties?.city, pt.properties.relativeLocation?.properties?.state].filter(Boolean).join(', '),
+      office: pt.properties.gridId,
+      hours: (hourly.properties?.periods || []).slice(0, 18).map((p) => ({ t: p.startTime, temp: p.temperature, rh: p.relativeHumidity?.value,
+        wind: p.windSpeed, dir: p.windDirection, pop: p.probabilityOfPrecipitation?.value, sky: p.shortForecast })),
+      days: (daily.properties?.periods || []).slice(0, 4).map((p) => ({ name: p.name, text: p.detailedForecast })),
+      alerts: (alerts.features || []).map((a) => ({ event: a.properties.event, headline: a.properties.headline, ends: a.properties.ends || a.properties.expires })),
+    };
+    DB.put('kv', wx, key).catch(() => {});
+    return wx;
+  } catch (err) {
+    const cached = await DB.get('kv', key).catch(() => null);
+    if (cached) return { ...cached, stale: true };
+    throw err;
+  }
+}
+async function showWeather(lat, lng, name) {
+  showForm('Spot weather', (el) => { el.append(h(`<p class="hint">${esc(name || ddm(lat, lng))}</p><p class="hint">Loading NWS forecast…</p>`)); });
+  let wx;
+  try { wx = await getWeather(lat, lng); }
+  catch (err) { $('#panel-body').innerHTML = `<p class="hint">${esc(name || ddm(lat, lng))}</p><p class="hint">Couldn't get weather: ${esc(err.message)}. Weather needs signal the first time for each area.</p>`; return; }
+  const mph = (s) => parseInt(String(s || '').split(' ').pop(), 10) || parseInt(s, 10) || 0;
+  const rows = wx.hours.map((x) => {
+    const crit = x.rh != null && x.rh <= 15 && mph(x.wind) >= 20;
+    return `<tr class="${crit ? 'crit' : ''}"><td>${new Date(x.t).toLocaleTimeString([], { hour: 'numeric' })}</td><td>${x.temp}°</td>
+      <td class="${x.rh != null && x.rh <= 15 ? 'hot' : ''}">${x.rh ?? '—'}%</td><td class="${mph(x.wind) >= 20 ? 'hot' : ''}">${esc(x.dir)} ${esc(x.wind)}</td><td>${x.pop ?? 0}%</td></tr>`;
+  }).join('');
+  $('#panel-body').innerHTML = '';
+  $('#panel-body').append(h(`
+    <p class="hint">${esc(name || ddm(lat, lng))}${wx.place ? ` · near ${esc(wx.place)}` : ''} · NWS ${esc(wx.office)}</p>
+    ${wx.stale ? `<p class="hint"><b>Offline: showing forecast saved ${fmtDate(wx.at)}</b></p>` : ''}
+    ${wx.alerts.map((a) => `<div class="wx-alert ${/red flag|fire/i.test(a.event) ? 'fire' : ''}"><b>${esc(a.event)}</b><br>${esc(a.headline || '')}</div>`).join('') || '<p class="hint">No active NWS alerts here.</p>'}
+    <h3>Next 18 hours</h3>
+    <div class="wx-wrap"><table class="wx"><tr><th>Time</th><th>Temp</th><th>RH</th><th>Wind</th><th>Rain</th></tr>${rows}</table></div>
+    <p class="hint">Highlighted: humidity ≤ 15% or wind ≥ 20 mph. Rows in red have both (red flag–type conditions).</p>
+    <h3>Forecast</h3>
+    ${wx.days.map((d) => `<p><b>${esc(d.name)}:</b> <span class="hint">${esc(d.text)}</span></p>`).join('')}
+    <p class="hint">Source: National Weather Service. Always confirm with your incident's fire weather forecast / spot forecast.</p>`));
+}
+
+// ---------------------------------------------------------------- incident notes & photos
+const incKey = (p) => p.IrwinID || p.UniqueFireIdentifier || `${p.IncidentName}|${p.POOState}`;
+function noteCount(key) { return S.notes.filter((n) => n.incident === key).length; }
+function incidentIcon(p) {
+  const n = noteCount(incKey(p));
+  return n ? L.divIcon({ className: 'fire-pin', html: FLAME + `<b class="note-badge">${n}</b>`, iconSize: [22, 22], iconAnchor: [11, 18] }) : fireIcon;
+}
+function refreshIncidentIcons() { G.incidents.eachLayer((l) => l.feature && l.setIcon(incidentIcon(l.feature.properties))); }
+function openIncidentNotes(key) {
+  const f = (S.incidentsData?.gj.features || []).find((x) => incKey(x.properties) === key);
+  const name = f?.properties.IncidentName || S.notes.find((n) => n.incident === key)?.incidentName || 'Incident';
+  map.closePopup();
+  showForm(`${name}: notes`, (el) => {
+    const list = S.notes.filter((n) => n.incident === key).sort((a, b) => b.at - a.at);
+    el.append(h(`
+      <p class="hint">Add updates, observations or photos. Each entry is timestamped and signed. Earlier entries are kept, and new ones are added on top.</p>
+      <label class="f">New note<textarea id="in-text" placeholder="e.g. Spotting across Hwy 21 at the ridge, crew pulled back to DP 4"></textarea></label>
+      <label class="f">Photo<input type="file" id="in-photo" accept="image/*" capture="environment"></label>
+      <img id="in-prev" class="photo-prev hidden" alt="">
+      <div class="btns"><button class="btn primary" id="in-add">Add note</button></div>
+      <h3>Log: ${list.length} ${list.length === 1 ? 'entry' : 'entries'}</h3>
+      ${list.map((n) => `<div class="note">
+          <div class="note-head"><b>${esc(new Date(n.at).toLocaleString())}</b><span>${esc(n.by || '')}</span></div>
+          ${n.text ? `<div class="note-text">${esc(n.text)}</div>` : ''}
+          ${n.photo ? `<img class="photo-prev" src="${n.photo}" alt="Note photo">` : ''}
+          ${n.by === localStorage.getItem('by') ? `<button class="btn danger note-del" data-note-del="${n.id}">Delete</button>` : ''}
+        </div>`).join('') || '<p class="hint">No notes yet. Be the first.</p>'}
+      <p class="hint">Notes are saved on this phone. Share them from Data ▸ Export ▸ “Incident notes”. Live sharing between phones comes with the online database.</p>`));
+    let photo = '';
+    $('#in-photo', el).onchange = async (e) => { const file = e.target.files[0]; if (!file) return; photo = await shrinkImage(file, 1000); const p = $('#in-prev', el); p.src = photo; p.classList.remove('hidden'); };
+    $('#in-add', el).onclick = async () => {
+      const text = $('#in-text', el).value.trim();
+      if (!text && !photo) return toast('Write a note or add a photo');
+      const [lng, lat] = f ? f.geometry.coordinates : [null, null];
+      const note = { id: uid(), incident: key, incidentName: name, lat, lng, at: Date.now(), by: localStorage.getItem('by') || '', text, photo };
+      await DB.put('notes', note); S.notes.push(note); refreshIncidentIcons();
+      toast('Note added'); openIncidentNotes(key);
+    };
+    el.querySelectorAll('[data-note-del]').forEach((b) => (b.onclick = async () => {
+      if (!confirm('Delete this note?')) return;
+      await DB.del('notes', b.dataset.noteDel); S.notes = S.notes.filter((n) => n.id !== b.dataset.noteDel);
+      refreshIncidentIcons(); openIncidentNotes(key);
+    }));
+  });
+}
+function notesAsFeatures() {
+  return S.notes.filter((n) => n.lat != null).map((n) => ({ id: n.id, kind: 'point', category: 'Incident note',
+    geometry: { type: 'Point', coordinates: [n.lng, n.lat] },
+    props: { label: `${n.incidentName}: ${new Date(n.at).toLocaleString()}`, notes: n.text, by: n.by, createdAt: n.at, incident: n.incidentName } }));
+}
+
+// ---------------------------------------------------------------- TAK data package (ATAK / iTAK / WinTAK)
+const CRC_TABLE = (() => { const t = new Uint32Array(256); for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; } return t; })();
+function crc32(b) { let c = 0xffffffff; for (let i = 0; i < b.length; i++) c = CRC_TABLE[(c ^ b[i]) & 0xff] ^ (c >>> 8); return (c ^ 0xffffffff) >>> 0; }
+function zipStore(files) { // minimal ZIP writer, no compression (TAK reads it fine)
+  const enc = new TextEncoder(), parts = [], central = []; let off = 0;
+  for (const f of files) {
+    const name = enc.encode(f.name), data = typeof f.data === 'string' ? enc.encode(f.data) : f.data, crc = crc32(data);
+    const lh = new DataView(new ArrayBuffer(30));
+    lh.setUint32(0, 0x04034b50, true); lh.setUint16(4, 20, true); lh.setUint16(8, 0, true);
+    lh.setUint32(14, crc, true); lh.setUint32(18, data.length, true); lh.setUint32(22, data.length, true); lh.setUint16(26, name.length, true);
+    parts.push(new Uint8Array(lh.buffer), name, data);
+    const ch = new DataView(new ArrayBuffer(46));
+    ch.setUint32(0, 0x02014b50, true); ch.setUint16(4, 20, true); ch.setUint16(6, 20, true);
+    ch.setUint32(16, crc, true); ch.setUint32(20, data.length, true); ch.setUint32(24, data.length, true); ch.setUint16(28, name.length, true); ch.setUint32(42, off, true);
+    central.push(new Uint8Array(ch.buffer), name);
+    off += 30 + name.length + data.length;
+  }
+  const csize = central.reduce((s, a) => s + a.length, 0), end = new DataView(new ArrayBuffer(22));
+  end.setUint32(0, 0x06054b50, true); end.setUint16(8, files.length, true); end.setUint16(10, files.length, true);
+  end.setUint32(12, csize, true); end.setUint32(16, off, true);
+  const all = [...parts, ...central, new Uint8Array(end.buffer)], out = new Uint8Array(all.reduce((s, a) => s + a.length, 0));
+  let p = 0; for (const a of all) { out.set(a, p); p += a.length; }
+  return out;
+}
+function argb(hex) { const v = parseInt(hex.replace('#', ''), 16); return ((0xff << 24) | v) | 0; } // signed int, as TAK expects
+function toTAK(feats, withTrack) {
+  const now = new Date(), stale = new Date(now.getTime() + 365 * 864e5), iso = (d) => d.toISOString();
+  const pts = feats.filter((f) => f.geometry.type === 'Point'), shapes = feats.filter((f) => f.geometry.type !== 'Point');
+  const files = [], contents = [];
+  for (const f of pts) {
+    const [lng, lat] = f.geometry.coordinates, color = argb(catOf(f).color), id = 'fireline-' + f.id;
+    const hae = f.props.elevFt != null ? (f.props.elevFt / 3.28084).toFixed(1) : '9999999.0';
+    const remarks = [f.category, f.props.notes, f.props.address, f.props.status, f.props.by && 'By ' + f.props.by].filter(Boolean).join(' | ');
+    files.push({ name: `${id}/${id}.cot`, data: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<event version="2.0" uid="${id}" type="b-m-p-s-m" time="${iso(now)}" start="${iso(now)}" stale="${iso(stale)}" how="h-g-i-g-o">
+<point lat="${lat}" lon="${lng}" hae="${hae}" ce="9999999.0" le="9999999.0"/>
+<detail><contact callsign="${xml(featName(f))}"/><remarks>${xml(remarks)}</remarks><color argb="${color}"/><usericon iconsetpath="COT_MAPPING_SPOTMAP/b-m-p-s-m/${color}"/><archive/><precisionlocation altsrc="DTED0"/></detail>
+</event>` });
+    contents.push(`<Content ignore="false" zipEntry="${id}/${id}.cot"><Parameter name="uid" value="${id}"/></Content>`);
+  }
+  if (shapes.length || (withTrack && S.track?.points.length > 1)) {
+    files.push({ name: 'fireline-lines-areas.kml', data: toKML(shapes, withTrack) });
+    contents.push('<Content ignore="false" zipEntry="fireline-lines-areas.kml"/>');
+  }
+  const pkg = 'fireline-' + uid();
+  files.unshift({ name: 'MANIFEST/manifest.xml', data: `<MissionPackageManifest version="2">
+<Configuration><Parameter name="uid" value="${pkg}"/><Parameter name="name" value="FireLine Field ${stamp()}"/><Parameter name="onReceiveDelete" value="false"/></Configuration>
+<Contents>${contents.join('')}</Contents>
+</MissionPackageManifest>` });
+  return zipStore(files);
+}
 
 // ---------------------------------------------------------------- misc wiring
 map.on('mousemove', (e) => { $('#coords').textContent = ddm(e.latlng.lat, e.latlng.lng); });
@@ -1337,6 +1578,7 @@ async function init() {
     const st = JSON.parse(localStorage.getItem('settings') || 'null');
     if (st) {
       if (st.basemap && BASEMAPS[st.basemap] && st.basemap !== S.basemap) setBasemap(st.basemap);
+      else baseTiles(S.basemap).forEach((l, i) => l.setZIndex(i));
       for (const k of Object.keys(S.layersOn)) if (k in (st.layersOn || {}) && st.layersOn[k] !== S.layersOn[k]) {
         S.layersOn[k] = st.layersOn[k]; S.layersOn[k] ? G[k].addTo(map) : map.removeLayer(G[k]);
       }
@@ -1344,6 +1586,7 @@ async function init() {
     }
   } catch { /* ignore bad settings */ }
   S.features = await DB.all('features');
+  S.notes = await DB.all('notes').catch(() => []);
   S.track = (await DB.get('tracks', 'current')) || null;
   renderMine(); renderTrack(); setNet(); refreshNifc();
   loadMaps().catch((e) => console.error('maps', e));

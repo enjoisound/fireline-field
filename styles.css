@@ -188,3 +188,27 @@ label.f textarea { min-height: 64px; resize: vertical; }
 .sym { display: flex; align-items: center; justify-content: center; border-radius: 50%; border: 2px solid #fff;
   font-size: 11px; font-weight: 800; color: #fff; box-shadow: 0 1px 3px #000; }
 a { color: var(--accent-2); }
+
+/* ---------- red flag banner, weather, incident notes */
+.rfw-banner { position: fixed; z-index: 1030; top: 52px; left: 0; right: 0; padding: 6px 12px; text-align: center;
+  font: 700 12.5px/1.3 var(--font); letter-spacing: 1.2px; color: #fff; background: #c2185b;
+  border-bottom: 1px solid #ff1493; animation: rfwpulse 2s infinite; }
+@keyframes rfwpulse { 50% { background: #8e0f42; } }
+.wx-wrap { overflow-x: auto; }
+table.wx { width: 100%; border-collapse: collapse; font-size: 13px; }
+table.wx th { text-align: left; color: var(--muted); font-weight: 600; padding: 4px 6px 4px 0; border-bottom: 1px solid var(--line); }
+table.wx td { padding: 5px 6px 5px 0; border-bottom: 1px solid var(--line); white-space: nowrap; }
+table.wx td.hot { color: #ffb020; font-weight: 700; }
+table.wx tr.crit td { background: rgba(255,20,147,.18); color: #ffd0e6; }
+.wx-alert { margin: 6px 0; padding: 8px 10px; border-radius: 6px; border: 1px solid var(--line); background: var(--panel-2); font-size: 13px; }
+.wx-alert.fire { border-color: #ff1493; background: rgba(255,20,147,.14); }
+.note { padding: 10px 0; border-bottom: 1px solid var(--line); }
+.note-head { display: flex; justify-content: space-between; gap: 8px; font-size: 12.5px; color: var(--accent-2); }
+.note-head span { color: var(--muted); }
+.note-text { margin-top: 4px; white-space: pre-wrap; }
+.note-del { margin-top: 6px; padding: 5px 10px; font-size: 12px; }
+.fire-pin { position: relative; }
+.note-badge { position: absolute; top: -7px; right: -9px; min-width: 15px; height: 15px; padding: 0 3px; border-radius: 8px;
+  background: #fff; color: #160403; font: 800 10px/15px var(--font); text-align: center; box-shadow: 0 0 0 1.5px var(--accent); }
+.rfw-banner:not(.hidden) ~ .coords { top: 88px; }
+.rfw-banner:not(.hidden) ~ .navbar { top: 86px; }

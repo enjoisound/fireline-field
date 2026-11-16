@@ -1,6 +1,6 @@
 // Service worker: makes the app open instantly and the map draw with no signal.
 // Bump V together with the ?v= numbers in index.html on every release.
-const V = '7';
+const V = '8';
 const SHELL = 'fireline-shell-v' + V;
 const TILES = 'fireline-tiles';
 const SHELL_FILES = [
@@ -12,7 +12,7 @@ const SHELL_FILES = [
   'https://unpkg.com/pdfjs-dist@3.11.174/build/pdf.worker.min.js',
   'https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js',
 ];
-const TILE_HOSTS = ['server.arcgisonline.com', 'tile.opentopomap.org', 'tile.openstreetmap.org'];
+const TILE_HOSTS = ['basemap.nationalmap.gov', 'server.arcgisonline.com', 'tile.opentopomap.org', 'tile.openstreetmap.org'];
 
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(SHELL).then((c) => c.addAll(SHELL_FILES)).then(() => self.skipWaiting()));

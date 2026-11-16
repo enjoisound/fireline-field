@@ -4,6 +4,7 @@
  */
 (() => {
 'use strict';
+const APP_VERSION = '12';
 
 // Custom line icons (stroke = currentColor) so the UI is ours, not emoji.
 const svg = (d) => `<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
@@ -18,6 +19,7 @@ const ICON = {
   night: svg('<path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z"/>'),
   note: svg('<path d="M4 4h16v12H8l-4 4z"/><path d="M8 9h8M8 12h5"/>'),
   wx: svg('<path d="M7 18a4 4 0 1 1 .9-7.9A6 6 0 0 1 19 12a3 3 0 0 1-1 5.9z"/>'),
+  cam: svg('<path d="M3 8h4l2-3h6l2 3h4v11H3z"/><circle cx="12" cy="13" r="3.5"/>'),
   pdf: svg('<path d="M6 2h9l5 5v15H6z"/><path d="M14 2v6h6"/><path d="M9 14h6M9 17h4"/>'),
 };
 
@@ -158,9 +160,16 @@ const S = {
 };
 
 // ---------------------------------------------------------------- map
-const FLAME = '<svg viewBox="0 0 24 24" width="22" height="22"><path d="M12 2c1.2 4 6 6.4 6 11.6a6 6 0 0 1-12 0c0-3 1.8-4.8 3-6.6 0 2 .9 3.3 2.1 3.9C10.3 7 11.2 4.4 12 2z" fill="#ff3b30" stroke="#160403" stroke-width="1.2"/><path d="M12 12.5c.8 2 2.6 3.1 2.6 5.2a2.6 2.6 0 0 1-5.2 0c0-1.5 1.1-2.3 1.5-3.4.4 1.2.8 1.5 1.1 1.5z" fill="#ffd0c8"/></svg>';
-const fireIcon = L.divIcon({ className: 'fire-pin', html: FLAME, iconSize: [22, 22], iconAnchor: [11, 18] });
+const FLAME = '<svg viewBox="0 0 24 24" width="26" height="26"><path d="M12 2c1.2 4 6 6.4 6 11.6a6 6 0 0 1-12 0c0-3 1.8-4.8 3-6.6 0 2 .9 3.3 2.1 3.9C10.3 7 11.2 4.4 12 2z" fill="#ff3b30" stroke="#160403" stroke-width="1.2"/><path d="M12 12.5c.8 2 2.6 3.1 2.6 5.2a2.6 2.6 0 0 1-5.2 0c0-1.5 1.1-2.3 1.5-3.4.4 1.2.8 1.5 1.1 1.5z" fill="#ffd0c8"/></svg>';
+const fireIcon = L.divIcon({ className: 'fire-pin', html: FLAME, iconSize: [34, 34], iconAnchor: [17, 26] });
+Object.assign(L.Popup.prototype.options, { autoPanPaddingTopLeft: L.point(12, 96), autoPanPaddingBottomRight: L.point(12, 16), maxWidth: 320 });
 const map = L.map('map', { zoomControl: true, attributionControl: true }).setView([39.5, -111.5], 5);
+map.on('popupopen', (e) => {
+  map.getContainer().classList.add('popup-open');
+  const c = e.popup.getElement()?.querySelector('.leaflet-popup-content');
+  if (c) c.style.maxHeight = Math.round(map.getSize().y * 0.62) + 'px';
+});
+map.on('popupclose', () => map.getContainer().classList.remove('popup-open'));
 map.createPane('geopdf').style.zIndex = 250; // above basemap tiles, below fire layers & markup
 BASEMAPS[S.basemap].addTo(map);
 L.control.scale({ imperial: true, metric: true }).addTo(map);
@@ -174,9 +183,10 @@ const G = {
   incidents: L.geoJSON(null, {
     pointToLayer: (f, ll) => L.marker(ll, { icon: incidentIcon(f.properties) }),
     onEachFeature: (f, l) => l.bindPopup(() => { const [lng, lat] = f.geometry.coordinates; const n = noteCount(incKey(f.properties));
-      return nifcPopup(f.properties, 'incident') + `<div class="btns">
+      const btns = `<div class="btns pop-actions">
         <button class="btn primary" data-inc-notes="${esc(incKey(f.properties))}">${ICON.note} Notes & photos${n ? ` (${n})` : ''}</button>
-        ${ptButtons(lat, lng, f.properties.IncidentName || 'Incident')}</div>`; }) }),
+        ${ptButtons(lat, lng, f.properties.IncidentName || 'Incident')}</div>`;
+      return nifcPopup(f.properties, 'incident').replace('</h4>', '</h4>' + btns); }) }),
   viirs: L.geoJSON(null, {
     pointToLayer: (f, ll) => L.circleMarker(ll, { radius: 4, color: '#ffd23f', weight: 1, fillColor: '#ff3b1a', fillOpacity: 0.9 }),
     onEachFeature: (f, l) => l.bindPopup(() => nifcPopup(f.properties, 'viirs')) }),
@@ -1003,6 +1013,9 @@ function renderData(el) {
     <p class="hint">Downloads the free USGS map for the area on screen (this zoom + 3 more levels) so it works with no signal. Areas you've already looked at on any basemap are also kept. Last-loaded fire layers and weather stay available offline too.</p>
     <button class="btn block" id="x-tiles">Download this area (${S.basemap})</button>
     <div class="hint" id="x-prog"></div>
+    <h3>App</h3>
+    <div class="row"><span class="grow">FireLine Field version ${APP_VERSION}<small>Updates install automatically. Close and reopen the app if a fire tap or button seems missing.</small></span>
+      <button class="btn" id="x-reload">Reload</button></div>
     <h3>Signed in</h3>
     <div class="row"><span class="grow">${esc(S.session?.name || '—')}<small>${esc(S.session?.crew || '')}</small></span>
       <button class="btn" id="x-out">Sign out</button></div>
@@ -1024,6 +1037,7 @@ function renderData(el) {
   $('#x-imp', el).onchange = importFile;
   $('#x-tiles', el).onclick = downloadTiles;
   $('#x-out', el).onclick = signOut;
+  $('#x-reload', el).onclick = () => location.reload();
   wireSharing(el);
   $('#x-wipe', el).onclick = async () => {
     if (!confirm('Delete ALL collected features, triage and tracks on this device? Export first if you need them.')) return;
@@ -1547,7 +1561,7 @@ const incKey = (p) => p.IrwinID || p.UniqueFireIdentifier || `${p.IncidentName}|
 function noteCount(key) { return S.notes.filter((n) => n.incident === key).length; }
 function incidentIcon(p) {
   const n = noteCount(incKey(p));
-  return n ? L.divIcon({ className: 'fire-pin', html: FLAME + `<b class="note-badge">${n}</b>`, iconSize: [22, 22], iconAnchor: [11, 18] }) : fireIcon;
+  return n ? L.divIcon({ className: 'fire-pin', html: FLAME + `<b class="note-badge">${n}</b>`, iconSize: [34, 34], iconAnchor: [17, 26] }) : fireIcon;
 }
 function refreshIncidentIcons() { G.incidents.eachLayer((l) => l.feature && l.setIcon(incidentIcon(l.feature.properties))); }
 function openIncidentNotes(key, keepScroll) {
@@ -1560,7 +1574,7 @@ function openIncidentNotes(key, keepScroll) {
     el.append(h(`
       <p class="hint">Add updates, observations or photos. Each entry is timestamped and signed. Earlier entries are kept, and new ones are added on top.</p>
       <label class="f">New note<textarea id="in-text" placeholder="e.g. Spotting across Hwy 21 at the ridge, crew pulled back to DP 4"></textarea></label>
-      <label class="f">Photo<input type="file" id="in-photo" accept="image/*" capture="environment"></label>
+      <label class="btn block photo-btn">${ICON.cam} Take or add a photo<input type="file" id="in-photo" accept="image/*" hidden></label>
       <img id="in-prev" class="photo-prev hidden" alt="">
       <div class="btns"><button class="btn primary" id="in-add">Add note</button></div>
       <h3>Log: ${list.length} ${list.length === 1 ? 'entry' : 'entries'}</h3>
@@ -1971,7 +1985,16 @@ async function init() {
   loadMaps().catch((e) => console.error('maps', e));
   backfillElevations();
   initSharing();
-  if ('serviceWorker' in navigator && location.protocol.startsWith('http')) navigator.serviceWorker.register('sw.js').catch(() => {});
+  if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
+    const hadController = !!navigator.serviceWorker.controller;
+    navigator.serviceWorker.register('sw.js').then((reg) => {
+      const check = () => reg.update().catch(() => {});
+      document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') check(); });
+      setInterval(check, 30 * 60 * 1000);
+    }).catch(() => {});
+    navigator.serviceWorker.addEventListener('controllerchange', () => { if (hadController) $('#update-bar').classList.remove('hidden'); });
+    $('#update-bar').onclick = () => location.reload();
+  }
 }
 init();
 })();

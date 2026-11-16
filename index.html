@@ -6,14 +6,14 @@
   <meta name="theme-color" content="#0a0606">
   <title>FireLine Field</title>
   <link rel="manifest" href="manifest.webmanifest">
-  <link rel="icon" href="icon.svg?v=11" type="image/svg+xml">
-  <link rel="apple-touch-icon" href="icon.svg?v=11">
+  <link rel="icon" href="icon.svg?v=12" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icon.svg?v=12">
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
-  <link rel="stylesheet" href="styles.css?v=11">
+  <link rel="stylesheet" href="styles.css?v=12">
 </head>
 <body>
   <header class="topbar">
-    <div class="brand"><img src="icon.svg?v=11" alt="" width="26" height="26"><span>FIRELINE<b>FIELD</b></span></div>
+    <div class="brand"><img src="icon.svg?v=12" alt="" width="26" height="26"><span>FIRELINE<b>FIELD</b></span></div>
     <div class="status">
       <span id="net" class="pill">online</span>
       <span id="gps" class="pill off">GPS off</span>
@@ -64,10 +64,11 @@
   </aside>
 
   <div id="toast" class="toast hidden"></div>
+  <button id="update-bar" class="update-bar hidden">New version ready. Tap to update.</button>
 
   <div id="login" class="login hidden">
     <form id="login-form" class="login-card" autocomplete="on">
-      <img src="icon.svg?v=11" alt="" width="64" height="64">
+      <img src="icon.svg?v=12" alt="" width="64" height="64">
       <h1>FIRELINE<b>FIELD</b></h1>
       <p class="hint">Crew sign-in</p>
       <label class="f">Your name<input name="name" required autocomplete="name" placeholder="J. Smith"></label>
@@ -80,9 +81,9 @@
   </div>
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-  <script src="firebase-config.js?v=11"></script>
-  <script src="config.js?v=11"></script>
-  <script src="db.js?v=11"></script>
-  <script src="app.js?v=11"></script>
+  <script src="firebase-config.js?v=12"></script>
+  <script src="config.js?v=12"></script>
+  <script src="db.js?v=12"></script>
+  <script src="app.js?v=12"></script>
 </body>
 </html>

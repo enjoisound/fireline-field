@@ -234,3 +234,15 @@ table.wx tr.crit td { background: rgba(255,20,147,.18); color: #ffd0e6; }
 .place-at { padding: 8px 10px; border-radius: 6px; border: 1px solid var(--accent); background: rgba(255,59,48,.08); font-size: 13.5px; margin-bottom: 4px; }
 .drawbtns { flex-wrap: wrap; }
 #d-trace.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); font-weight: 700; }
+
+/* ---------- popups on phones, update bar */
+.popup-open ~ .coords, body:has(.popup-open) .coords { display: none; }
+.leaflet-popup-content { overflow-y: auto; }
+.pop-actions { margin: 4px 0 8px; }
+.fire-pin { display: grid; place-items: center; }
+.fire-pin svg { display: block; }
+.note-badge { top: -2px; right: -2px; }
+.update-bar { position: fixed; z-index: 2500; left: 50%; bottom: calc(76px + var(--safe-b)); transform: translateX(-50%);
+  padding: 12px 18px; border-radius: 8px; border: 0; background: var(--accent); color: var(--accent-ink);
+  font: 700 14px/1.2 var(--font); letter-spacing: .5px; box-shadow: 0 8px 24px rgba(0,0,0,.6); white-space: nowrap; }
+.photo-btn { margin-top: 10px; }

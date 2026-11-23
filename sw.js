@@ -1,6 +1,6 @@
 // Service worker: makes the app open instantly and the map draw with no signal.
 // Bump V together with the ?v= numbers in index.html on every release.
-const V = '14';
+const V = '15';
 const SHELL = 'fireline-shell-v' + V;
 const TILES = 'fireline-tiles';
 const SHELL_FILES = [

@@ -4,7 +4,7 @@
  */
 (() => {
 'use strict';
-const APP_VERSION = '14';
+const APP_VERSION = '15';
 
 // Custom line icons (stroke = currentColor) so the UI is ours, not emoji.
 const svg = (d) => `<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
@@ -1674,7 +1674,8 @@ function toTAK(feats, withTrack) {
 // them when coverage returns. Sign-in is anonymous per device; the person's name comes from crew sign-in.
 const FB_V = '10.14.1';
 const FB_URL = (m) => `https://www.gstatic.com/firebasejs/${FB_V}/firebase-${m}.js`;
-const SYNC = { fb: null, room: null, unsub: [], members: [], pending: false, fromCache: true, lastError: '' };
+const SYNC = { fb: null, room: null, unsub: [], members: [], pending: false, fromCache: true, lastError: '', seenAt: 0, catchUp: null, catchUpTimers: [] };
+const DEBUG_SYNC = /[?&]debugsync/.test(location.search);
 
 async function fbInit() {
   if (SYNC.fb) return SYNC.fb;
@@ -1686,7 +1687,8 @@ async function fbInit() {
   let db;
   // Long polling: slower to set up than streaming in theory, but reliable on agency networks, proxies and
   // flaky cell links, and avoids a slow first sync while the SDK probes the connection.
-  try { db = fs.initializeFirestore(app, { experimentalForceLongPolling: true, localCache: fs.persistentLocalCache({ tabManager: fs.persistentMultipleTabManager() }) }); }
+  const opts = { experimentalForceLongPolling: true, localCache: fs.persistentLocalCache({ tabManager: fs.persistentMultipleTabManager() }) };
+  try { db = fs.initializeFirestore(app, opts); }
   catch { db = fs.getFirestore(app); }
   await auth.authStateReady();
   if (!auth.currentUser) await authM.signInAnonymously(auth);
@@ -1743,7 +1745,7 @@ async function leaveRoom() {
   for (const n of S.notes) if (n.room === id) { delete n.room; DB.put('notes', n); }
   updateSyncPill();
 }
-function stopRoom() { SYNC.unsub.forEach((u) => u()); SYNC.unsub = []; SYNC.room = null; SYNC.members = []; }
+function stopRoom() { SYNC.unsub.forEach((u) => u()); SYNC.unsub = []; SYNC.room = null; SYNC.members = []; SYNC.seenAt = 0; SYNC.catchUpTimers.forEach(clearTimeout); SYNC.catchUpTimers = []; SYNC.catchUp = null; }
 
 async function activateRoom(room) {
   const { db, fs } = await fbInit();
@@ -1760,7 +1762,30 @@ async function activateRoom(room) {
     SYNC.lastError = err.message; updateSyncPill(); console.error('sync', err);
   };
 
+  const applyFeat = async (id, data) => {
+    const f = docToFeat(id, data);
+    SYNC.seenAt = Math.max(SYNC.seenAt || 0, data.updatedAt || 0);
+    const i = S.features.findIndex((x) => x.id === f.id);
+    const localT = i >= 0 ? (S.features[i].props.updatedAt || S.features[i].props.createdAt || 0) : -1;
+    if (i >= 0 && (f.props.updatedAt || f.props.createdAt || 0) < localT) return false;
+    if (i >= 0 && JSON.stringify(S.features[i]) === JSON.stringify(f)) return false;
+    if (i >= 0) S.features[i] = f; else S.features.push(f);
+    await DB.put('features', f); return true;
+  };
+  const applyNote = async (id, data) => {
+    const { updatedAt, updatedBy, ...n } = data;
+    SYNC.seenAt = Math.max(SYNC.seenAt || 0, updatedAt || 0);
+    const note = { ...n, id, room: room.id };
+    const i = S.notes.findIndex((x) => x.id === note.id);
+    if (i >= 0 && JSON.stringify(S.notes[i]) === JSON.stringify(note)) return false;
+    if (i >= 0) S.notes[i] = note; else S.notes.push(note);
+    await DB.put('notes', note); return true;
+  };
+  const afterFeat = () => { renderMine(); if (openKey === 'triage' || openKey === 'data') { const k = openKey; openKey = null; openPanel(k); } };
+  const afterNote = () => { refreshIncidentIcons(); if (S.openNotesKey && openKey === '__form') openIncidentNotes(S.openNotesKey, true); };
+
   SYNC.unsub.push(fs.onSnapshot(col('features'), { includeMetadataChanges: true }, async (snap) => {
+    if (DEBUG_SYNC) (window.__synclog = window.__synclog || []).push({ t: Date.now(), fromCache: snap.metadata.fromCache, pending: snap.metadata.hasPendingWrites, n: snap.docChanges().length });
     SYNC.pending = snap.metadata.hasPendingWrites; SYNC.fromCache = snap.metadata.fromCache; SYNC.lastError = '';
     let changed = false;
     for (const ch of snap.docChanges()) {
@@ -1770,15 +1795,9 @@ async function activateRoom(room) {
         }
         continue;
       }
-      const f = docToFeat(ch.doc.id, ch.doc.data());
-      const i = S.features.findIndex((x) => x.id === f.id);
-      const localT = i >= 0 ? (S.features[i].props.updatedAt || S.features[i].props.createdAt || 0) : -1;
-      if (i < 0 || (f.props.updatedAt || f.props.createdAt || 0) >= localT) {
-        if (i >= 0) S.features[i] = f; else S.features.push(f);
-        await DB.put('features', f); changed = true;
-      }
+      if (await applyFeat(ch.doc.id, ch.doc.data())) changed = true;
     }
-    if (changed) { renderMine(); if (openKey === 'triage' || openKey === 'data') { const k = openKey; openKey = null; openPanel(k); } }
+    if (changed) afterFeat();
     updateSyncPill();
   }, onErr));
 
@@ -1786,14 +1805,29 @@ async function activateRoom(room) {
     let changed = false;
     for (const ch of snap.docChanges()) {
       if (ch.type === 'removed') { S.notes = S.notes.filter((n) => n.id !== ch.doc.id); await DB.del('notes', ch.doc.id); changed = true; continue; }
-      const { updatedAt, updatedBy, ...n } = ch.doc.data();
-      const note = { ...n, id: ch.doc.id, room: room.id };
-      const i = S.notes.findIndex((x) => x.id === note.id);
-      if (i >= 0) S.notes[i] = note; else S.notes.push(note);
-      await DB.put('notes', note); changed = true;
+      if (await applyNote(ch.doc.id, ch.doc.data())) changed = true;
     }
-    if (changed) { refreshIncidentIcons(); if (S.openNotesKey && openKey === '__form') openIncidentNotes(S.openNotesKey, true); }
+    if (changed) afterNote();
   }, onErr));
+
+  // A phone's live connection can stall for ~25 s right after joining or reopening a room, even though the
+  // data is already on the server. Pull anything changed since the last update we saw, a few times during
+  // the first minute and whenever the app returns to the foreground or regains signal. Cheap: only changed
+  // records are read.
+  SYNC.catchUp = async () => {
+    if (!SYNC.room || SYNC.room.id !== room.id || !navigator.onLine) return;
+    const since = Math.max(0, (SYNC.seenAt || 0) - 10 * 60 * 1000); // 10-min margin for phone clock differences
+    try {
+      for (const [c, apply, after] of [['features', applyFeat, afterFeat], ['notes', applyNote, afterNote]]) {
+        const snap = await fs.getDocsFromServer(fs.query(col(c), fs.where('updatedAt', '>', since)));
+        let changed = false;
+        for (const d of snap.docs) if (await apply(d.id, d.data())) changed = true;
+        if (changed) after();
+      }
+    } catch (e) { if (e.code === 'permission-denied') onErr(e); }
+  };
+  SYNC.catchUpTimers.forEach(clearTimeout);
+  SYNC.catchUpTimers = [3, 7, 12, 20, 30, 45, 60].map((sec) => setTimeout(SYNC.catchUp, sec * 1000));
 
   SYNC.unsub.push(fs.onSnapshot(col('members'), (snap) => {
     SYNC.members = snap.docs.map((d) => ({ uid: d.id, ...d.data() }));
@@ -1906,7 +1940,12 @@ async function initSharing() {
     if (saved) await activateRoom(saved);
   } catch (e) { console.error('sharing', e); toast('Live sharing: ' + e.message, 5000); }
 }
-addEventListener('online', updateSyncPill); addEventListener('offline', updateSyncPill);
+addEventListener('online', () => { updateSyncPill(); SYNC.catchUp?.(); }); addEventListener('offline', updateSyncPill);
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState !== 'visible' || !SYNC.catchUp) return;
+  SYNC.catchUpTimers.forEach(clearTimeout);
+  SYNC.catchUpTimers = [1, 5, 12, 25].map((sec) => setTimeout(() => SYNC.catchUp?.(), sec * 1000));
+});
 
 // ---------------------------------------------------------------- private vs shared (per item)
 function shareToggle(isPrivate) {

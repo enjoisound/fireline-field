@@ -4,7 +4,7 @@
  */
 (() => {
 'use strict';
-const APP_VERSION = '12';
+const APP_VERSION = '13';
 
 // Custom line icons (stroke = currentColor) so the UI is ours, not emoji.
 const svg = (d) => `<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
@@ -408,7 +408,12 @@ function redrawDeco() {
 }
 map.on('zoomend', redrawDeco);
 // Point labels only when zoomed in enough to read them
-const syncLabelZoom = () => map.getContainer().classList.toggle('labels-off', map.getZoom() < 12);
+const syncLabelZoom = () => {
+  const z = map.getZoom(), c = map.getContainer().classList;
+  c.toggle('labels-off', z < 12);
+  c.toggle('zoom-far', z < 6);              // whole-country view: small flames so they don't pile up
+  c.toggle('zoom-mid', z >= 6 && z < 8);
+};
 map.on('zoomend', syncLabelZoom);
 
 function renderMine() {

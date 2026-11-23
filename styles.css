@@ -207,7 +207,8 @@ table.wx tr.crit td { background: rgba(255,20,147,.18); color: #ffd0e6; }
 .note-head span { color: var(--muted); }
 .note-text { margin-top: 4px; white-space: pre-wrap; }
 .note-del { margin-top: 6px; padding: 5px 10px; font-size: 12px; }
-.fire-pin { position: relative; }
+/* Markers must keep Leaflet's absolute positioning; only legend/list flames are inline. */
+span.fire-pin { position: relative; }
 .note-badge { position: absolute; top: -7px; right: -9px; min-width: 15px; height: 15px; padding: 0 3px; border-radius: 8px;
   background: #fff; color: #160403; font: 800 10px/15px var(--font); text-align: center; box-shadow: 0 0 0 1.5px var(--accent); }
 .rfw-banner:not(.hidden) ~ .coords { top: 88px; }
@@ -246,3 +247,6 @@ table.wx tr.crit td { background: rgba(255,20,147,.18); color: #ffd0e6; }
   padding: 12px 18px; border-radius: 8px; border: 0; background: var(--accent); color: var(--accent-ink);
   font: 700 14px/1.2 var(--font); letter-spacing: .5px; box-shadow: 0 8px 24px rgba(0,0,0,.6); white-space: nowrap; }
 .photo-btn { margin-top: 10px; }
+/* Flames shrink when zoomed out so a region's fires stay readable */
+.zoom-far .leaflet-marker-icon.fire-pin svg { transform: scale(.5); transform-origin: 50% 85%; }
+.zoom-mid .leaflet-marker-icon.fire-pin svg { transform: scale(.75); transform-origin: 50% 85%; }

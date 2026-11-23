@@ -1,2 +1,8 @@
 .claude/
 test/
+# Other projects that live in this folder: never publish them
+allaboutac-site/
+allaboutacandheating/
+generated/
+.agents/
+skills-lock.json

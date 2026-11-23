@@ -4,7 +4,7 @@
  */
 (() => {
 'use strict';
-const APP_VERSION = '13';
+const APP_VERSION = '14';
 
 // Custom line icons (stroke = currentColor) so the UI is ours, not emoji.
 const svg = (d) => `<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
@@ -20,6 +20,7 @@ const ICON = {
   note: svg('<path d="M4 4h16v12H8l-4 4z"/><path d="M8 9h8M8 12h5"/>'),
   wx: svg('<path d="M7 18a4 4 0 1 1 .9-7.9A6 6 0 0 1 19 12a3 3 0 0 1-1 5.9z"/>'),
   cam: svg('<path d="M3 8h4l2-3h6l2 3h4v11H3z"/><circle cx="12" cy="13" r="3.5"/>'),
+  book: svg('<path d="M4 5a2 2 0 0 1 2-2h13v16H6a2 2 0 0 0-2 2z"/><path d="M4 19V5M8 7h7"/>'),
   pdf: svg('<path d="M6 2h9l5 5v15H6z"/><path d="M14 2v6h6"/><path d="M9 14h6M9 17h4"/>'),
 };
 
@@ -133,18 +134,13 @@ const BASEMAPS = {
   ]),
   'Satellite (clean)': esriTile('World_Imagery', { attribution: 'Tiles © Esri, Maxar, Earthstar Geographics' }),
   'USGS Shaded relief + hydro': L.layerGroup([usgsTile('USGSShadedReliefOnly'), usgsTile('USGSHydroCached', { opacity: 0.9 })]),
-  'Esri Topo': esriTile('World_Topo_Map'),
-  'OpenTopoMap': L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png',
-    { maxZoom: 17, attribution: '© OpenStreetMap contributors, SRTM | © OpenTopoMap (CC-BY-SA)' }),
-  'Streets (OSM)': L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-    { maxZoom: 19, attribution: '© OpenStreetMap contributors' }),
 };
 const baseTiles = (name) => { const l = BASEMAPS[name]; return l instanceof L.TileLayer ? [l] : l.getLayers(); };
 
 // ---------------------------------------------------------------- state
 const S = {
   basemap: 'USGS Topo',
-  layersOn: { redflag: true, incidents: true, perimeters: true, viirs: false, mine: true, triage: true, track: true },
+  layersOn: { redflag: true, incidents: true, perimeters: true, viirs: false, radar: false, wind: false, slope: false, mine: true, triage: true, track: true },
   rfwData: null,
   notes: [],              // incident notes & photos
   features: [],           // my collected features (incl. triage)
@@ -363,6 +359,7 @@ function featurePopup(f) {
   if (f.kind === 'line') add('Length', pathLen(toLL(f.geometry.coordinates)).toFixed(0) + ' m / ' + (pathLen(toLL(f.geometry.coordinates)) / 20.1168).toFixed(1) + ' ch');
   if (f.kind === 'polygon') add('Area', (area(toLL(f.geometry.coordinates[0])) / 4046.8564).toFixed(1) + ' ac');
   add('Label', p.label); add('Notes', p.notes); add('Collected', fmtDate(p.createdAt)); add('By', p.by);
+  add('Sharing', f.private ? '🔒 Private (this phone only)' : f.room ? 'Shared with room' : '');
   let ptBtns = '';
   if (f.kind === 'point' || f.kind === 'triage') {
     const [lng, lat] = f.geometry.coordinates;
@@ -625,7 +622,7 @@ const PANELS = {
   triage: { title: 'Structure triage', render: renderTriage },
   tools: { title: 'Navigate & measure', render: renderTools },
   data: { title: 'My data & offline', render: renderData },
-  intel: { title: 'Fire intel & resources', render: renderIntel },
+  library: { title: 'Library & resources', render: renderLibrary },
 };
 let openKey = null;
 function openPanel(key) {
@@ -659,6 +656,9 @@ function renderLayers(el) {
   const layerRow = (key, name, sub, sw) => `<label class="row"><input type="checkbox" data-layer="${key}" ${S.layersOn[key] ? 'checked' : ''}>
     ${sw}<span class="grow">${name}<small>${sub}</small></span></label>`;
   el.append(h(`
+    <h3>Find a fire</h3>
+    <input class="search" id="i-q" placeholder="Search current incidents by name…">
+    <div id="i-res"></div>
     <h3>Incident maps (GeoPDF)</h3>
     <p class="hint">Import the GeoPDF maps from your IAP. They're stored on this phone, work offline, and show your GPS position and markup on top.</p>
     <label class="btn primary block">${ICON.pdf} Import GeoPDF<input type="file" id="gp-file" accept="application/pdf,.pdf" hidden></label>
@@ -676,6 +676,11 @@ function renderLayers(el) {
     ${layerRow('incidents', 'Current incidents', 'WFIGS incident locations (IRWIN)', `<span class="fire-pin">${FLAME}</span>`)}
     ${layerRow('perimeters', 'Current fire perimeters', 'WFIGS interagency perimeters', '<span class="swatch" style="background:#ff2a1a55;border-color:#ff2a1a"></span>')}
     ${layerRow('viirs', 'VIIRS / MODIS hotspots (48 h)', 'Satellite thermal detections · zoom in to see', '<span class="swatch dot" style="background:#ff3b1a"></span>')}
+    <h3>Weather & terrain</h3>
+    ${layerRow('radar', 'Weather radar', 'NEXRAD reflectivity, updates every 5 min', '<span class="swatch" style="background:linear-gradient(90deg,#2ecc71,#f1c40f,#e74c3c)"></span>')}
+    ${layerRow('wind', 'Wind now (arrows)', 'Speed & gusts in mph, arrow points where wind is blowing', `<span class="swatch-ico">${ICON.nav}</span>`)}
+    ${layerRow('slope', 'Slope shading', 'Zoom in (level 8+). Percent slope classes below', '<span class="swatch" style="background:linear-gradient(90deg,#ffd600,#ff8c00,#e62828,#8c28c8)"></span>')}
+    <div class="slope-legend">${SLOPE_CLASSES.map((c) => `<span><i style="background:rgb(${c.color})"></i>${c.label}</span>`).join('')}</div>
     <h3>My data</h3>
     ${layerRow('mine', 'Points, lines & polygons', 'Collected on this device', '<span class="swatch" style="background:#2f8cff"></span>')}
     ${layerRow('triage', 'Structure triage', 'Assessments on this device', '<span class="swatch dot" style="background:#3fbf6f"></span>')}
@@ -695,7 +700,23 @@ function renderLayers(el) {
     if (k === 'redflag') { S.rfwAt = 0; if (cb.checked) G.redflag.bringToBack(); }
     saveSettings(); if (cb.checked) refreshNifc();
     if (k === 'viirs' && cb.checked && map.getZoom() < 6) toast('Zoom in (level 6+) to load hotspots');
+    if (k === 'wind' && cb.checked) refreshWind();
+    if (k === 'slope' && cb.checked && map.getZoom() < 8) toast('Zoom in (level 8+) to see slope shading');
   }));
+  const q = $('#i-q', el), res = $('#i-res', el);
+  q.oninput = () => {
+    const t = q.value.trim().toLowerCase(); res.innerHTML = '';
+    if (t.length < 2) return;
+    const feats = (S.incidentsData?.gj.features || []).filter((f) => (f.properties.IncidentName || '').toLowerCase().includes(t)).slice(0, 25);
+    if (!feats.length) { res.innerHTML = `<p class="hint">${S.incidentsData ? 'No match.' : 'Incident layer not loaded yet.'}</p>`; return; }
+    feats.forEach((f) => {
+      const pr = f.properties, r = h(`<div class="row" style="cursor:pointer"><span class="fire-pin">${FLAME}</span><span class="grow">${esc(pr.IncidentName)}
+        <small>${esc(pr.POOState || '')} · ${pr.IncidentSize != null ? esc(pr.IncidentSize) + ' ac' : 'size n/a'}${pr.PercentContained != null ? ' · ' + pr.PercentContained + '% contained' : ''}</small></span></div>`).firstElementChild;
+      r.onclick = () => { const [lng, lat] = f.geometry.coordinates; closePanel(); map.setView([lat, lng], 12);
+        G.incidents.eachLayer((l) => { if (l.feature === f) l.openPopup(); }); };
+      res.appendChild(r);
+    });
+  };
   el.querySelectorAll('[name=bm]').forEach((r) => (r.onchange = () => setBasemap(r.value)));
   $('#gp-file', el).onchange = (e) => importGeoPdf(e.target.files[0]);
   el.querySelectorAll('[data-gp-on]').forEach((cb) => (cb.onchange = () => setMapOn(cb.dataset.gpOn, cb.checked)));
@@ -749,13 +770,15 @@ function openFeatureForm(f, isNew = false) {
       <label class="f">Label<input name="label" value="${esc(f.props.label)}" placeholder="e.g. DP 12, Div A"></label>
       <label class="f">Notes<textarea name="notes">${esc(f.props.notes)}</textarea></label>
       <label class="f">Collected by<input name="by" value="${esc(f.props.by || localStorage.getItem('by') || '')}" placeholder="Name / resource"></label>
+      ${shareToggle(f.private)}
       <div class="btns"><button class="btn primary" id="sv">Save</button><button class="btn" id="cx">Cancel</button></div>`));
     $('#sv', el).onclick = async () => {
       f.category = $('[name=category]', el).value;
       f.props = { ...f.props, label: $('[name=label]', el).value.trim(), notes: $('[name=notes]', el).value.trim(),
         by: $('[name=by]', el).value.trim(), updatedAt: Date.now() };
       localStorage.setItem('by', f.props.by);
-      await saveFeature(f); closePanel(); toast('Saved');
+      applyShareChoice(f, el);
+      await saveFeature(f); closePanel(); toast(f.private && SYNC.room ? 'Saved privately (this phone only)' : 'Saved');
     };
     $('#cx', el).onclick = closePanel;
   });
@@ -802,6 +825,7 @@ function openTriageForm(f, isNew = false) {
       <label class="f">Photo<input type="file" name="photo" accept="image/*" capture="environment"></label>
       ${p.photo ? `<img class="photo-prev" src="${p.photo}">` : '<img class="photo-prev hidden">'}
       <label class="f">Assessed by<input name="by" value="${esc(p.by || localStorage.getItem('by') || '')}"></label>
+      ${shareToggle(f.private)}
       <div class="btns"><button class="btn primary" id="sv">Save assessment</button><button class="btn" id="cx">Cancel</button></div>`));
     let photo = p.photo || '';
     $('[name=photo]', el).onchange = async (e) => {
@@ -816,6 +840,7 @@ function openTriageForm(f, isNew = false) {
         hazards: [...el.querySelectorAll('[name=hazards]:checked')].map((c) => c.value),
         notes: $('[name=notes]', el).value.trim(), by: $('[name=by]', el).value.trim(), photo, updatedAt: Date.now() };
       localStorage.setItem('by', f.props.by);
+      applyShareChoice(f, el);
       await saveFeature(f); toast('Assessment saved'); openPanel('triage');
     };
     $('#cx', el).onclick = closePanel;
@@ -998,6 +1023,9 @@ function renderData(el) {
     <div class="row"><span class="grow">Lines</span><b>${n('line')}</b></div>
     <div class="row"><span class="grow">Polygons</span><b>${n('polygon')}</b></div>
     <div class="row"><span class="grow">Structure assessments</span><b>${n('triage')}</b></div>
+    <h3>Send to incident GIS</h3>
+    <p class="hint">One zip with everything you collected (map data, triage, incident notes, photos, GPS track) in formats the GISS can load straight into ArcGIS or QGIS. Send it before you rotate out so your work makes the official map.</p>
+    <button class="btn primary block" id="x-gis">Send to incident GIS…</button>
     <h3>Share & export</h3>
     <label class="f">What to export<select id="x-what">${exportChoices().map(([v, t]) => `<option value="${esc(v)}">${esc(t)}</option>`).join('')}</select></label>
     <label class="f">Format<select id="x-fmt">
@@ -1042,6 +1070,8 @@ function renderData(el) {
   $('#x-imp', el).onchange = importFile;
   $('#x-tiles', el).onclick = downloadTiles;
   $('#x-out', el).onclick = signOut;
+  $('#x-gis', el).onclick = sendToGis;
+  drawRoomQr($('#sh-qr', el));
   $('#x-reload', el).onclick = () => location.reload();
   wireSharing(el);
   $('#x-wipe', el).onclick = async () => {
@@ -1108,42 +1138,6 @@ async function downloadTiles() {
   };
   await Promise.all(Array.from({ length: 6 }, worker));
   toast(`Offline area ready (${done - fail} tiles)`);
-}
-
-// ---- Intel & resources
-function renderIntel(el) {
-  el.append(h(`
-    <h3>Find an incident</h3>
-    <input class="search" id="i-q" placeholder="Search current incidents by name…">
-    <div id="i-res"></div>
-    <h3>FireGuard</h3>
-    <p class="hint">DoD satellite fire mapping, updated as often as every 15 minutes — most valuable in the first 24–48 hours of a fire when other intel is thin. It is <b>only</b> available through the NIFC ArcGIS Online org (login required), so it can't be shown in this public app. Open it in Field Maps or the NIFC org.</p>
-    <a class="btn block" href="https://iaa-nifc.hub.arcgis.com/pages/fireguard" target="_blank" rel="noopener">FireGuard info (IAA hub)</a>
-    <h3>NIFC ArcGIS Online org</h3>
-    <p class="hint">Open to federal, state, local and tribal wildland firefighters and cooperators — not just feds. Gives you NIFS editing, the National Structure Triage layer, offline Field Maps templates and FireGuard.</p>
-    <a class="btn block" href="https://support-nifc.hub.arcgis.com/" target="_blank" rel="noopener">Request a NIFC account</a>
-    <a class="btn block" href="https://nifc.maps.arcgis.com/home/index.html" target="_blank" rel="noopener">NIFC org sign-in</a>
-    <h3>Other sources</h3>
-    <a class="btn block" href="https://data-nifc.opendata.arcgis.com/search" target="_blank" rel="noopener">NIFC Open Data (perimeters, RAWS, PODs, boundaries)</a>
-    <a class="btn block" href="https://egp.wildfire.gov/egp/default.aspx" target="_blank" rel="noopener">Enterprise Geospatial Portal (EGP / WildFireSA)</a>
-    <a class="btn block" href="https://www.nifc.gov/nicc/incident-information/imsr" target="_blank" rel="noopener">IMSR dashboard (national situation)</a>
-    <a class="btn block" href="https://iaa-nifc.hub.arcgis.com/" target="_blank" rel="noopener">Incident Awareness & Assessment (IAA)</a>
-    <h3>Field reminders</h3>
-    <p class="hint"><b>LCES</b> — Lookouts, Communications, Escape routes, Safety zones. Mark them with Collect ▸ Points before engaging.</p>`));
-  const q = $('#i-q', el), res = $('#i-res', el);
-  q.oninput = () => {
-    const s = q.value.trim().toLowerCase(); res.innerHTML = '';
-    if (s.length < 2) return;
-    const feats = (S.incidentsData?.gj.features || []).filter((f) => (f.properties.IncidentName || '').toLowerCase().includes(s)).slice(0, 25);
-    if (!feats.length) { res.innerHTML = `<p class="hint">${S.incidentsData ? 'No match.' : 'Incident layer not loaded yet.'}</p>`; return; }
-    feats.forEach((f) => {
-      const p = f.properties, r = h(`<div class="row" style="cursor:pointer"><span class="fire-pin">${FLAME}</span><span class="grow">${esc(p.IncidentName)}
-        <small>${esc(p.POOState || '')} · ${p.IncidentSize != null ? esc(p.IncidentSize) + ' ac' : 'size n/a'}${p.PercentContained != null ? ' · ' + p.PercentContained + '% contained' : ''}</small></span></div>`).firstElementChild;
-      r.onclick = () => { const [lng, lat] = f.geometry.coordinates; closePanel(); map.setView([lat, lng], 12);
-        L.popup().setLatLng([lat, lng]).setContent(nifcPopup(p, 'incident')).openOn(map); };
-      res.appendChild(r);
-    });
-  };
 }
 
 // ---------------------------------------------------------------- copy coordinates
@@ -1346,10 +1340,11 @@ async function importGeoPdf(file) {
     const blob = await renderPdfImage(buf.slice());
     const m = { id: uid(), name: file.name.replace(/\.pdf$/i, ''), corners: geo.corners, fitErrM: geo.fitErrM,
       opacity: 0.9, on: true, createdAt: Date.now(), size: blob.size };
-    await DB.put('maps', { ...m, blob });
+    m.hasPdf = true;
+    await DB.put('maps', { ...m, blob, pdf: new Blob([buf], { type: 'application/pdf' }) });
     S.maps.push(m); addMapLayer(m, blob);
     map.fitBounds(G.maps[m.id].getBounds());
-    prog(''); toast(`Map added: ${m.name}`);
+    prog(''); toast(`Map added: ${m.name}`); updateMapSwitcher(); scheduleDetail();
     if (openKey === 'layers') { openKey = null; openPanel('layers'); }
   } catch (err) {
     console.error(err); prog(''); toast('GeoPDF import failed: ' + err.message, 6000);
@@ -1363,21 +1358,25 @@ async function saveMapMeta(m) { const rec = await DB.get('maps', m.id); if (rec)
 function setMapOn(id, on) {
   const m = S.maps.find((x) => x.id === id); if (!m) return;
   m.on = on; on ? G.maps[id].addTo(map) : map.removeLayer(G.maps[id]); saveMapMeta(m);
+  if (!on) clearDetail(id); else scheduleDetail();
+  updateMapSwitcher();
+  const cb = document.querySelector(`[data-gp-on="${id}"]`); if (cb) cb.checked = on;
 }
 function setMapOpacity(id, o) {
   const m = S.maps.find((x) => x.id === id); if (!m) return;
-  m.opacity = o; G.maps[id].setOpacity(o); clearTimeout(m._t); m._t = setTimeout(() => { delete m._t; saveMapMeta(m); }, 400);
+  m.opacity = o; G.maps[id].setOpacity(o); detail[id]?.layer?.setOpacity(o); clearTimeout(m._t); m._t = setTimeout(() => { delete m._t; saveMapMeta(m); }, 400);
 }
 async function deleteMap(id) {
   const m = S.maps.find((x) => x.id === id); if (!m || !confirm(`Remove map "${m.name}" from this device?`)) return;
-  map.removeLayer(G.maps[id]); delete G.maps[id];
-  S.maps = S.maps.filter((x) => x.id !== id); await DB.del('maps', id);
+  clearDetail(id); map.removeLayer(G.maps[id]); delete G.maps[id]; delete pdfDocs[id];
+  S.maps = S.maps.filter((x) => x.id !== id); await DB.del('maps', id); updateMapSwitcher();
   openKey = null; openPanel('layers');
 }
 async function loadMaps() {
   for (const rec of await DB.all('maps')) {
-    const { blob, ...m } = rec; S.maps.push(m); addMapLayer(m, blob);
+    const { blob, pdf, ...m } = rec; m.hasPdf = !!pdf; S.maps.push(m); addMapLayer(m, blob);
   }
+  updateMapSwitcher(); scheduleDetail();
 }
 
 // ---------------------------------------------------------------- export (GeoJSON / KML / GPX / CSV)
@@ -1581,6 +1580,7 @@ function openIncidentNotes(key, keepScroll) {
       <label class="f">New note<textarea id="in-text" placeholder="e.g. Spotting across Hwy 21 at the ridge, crew pulled back to DP 4"></textarea></label>
       <label class="btn block photo-btn">${ICON.cam} Take or add a photo<input type="file" id="in-photo" accept="image/*" hidden></label>
       <img id="in-prev" class="photo-prev hidden" alt="">
+      ${shareToggle(false)}
       <div class="btns"><button class="btn primary" id="in-add">Add note</button></div>
       <h3>Log: ${list.length} ${list.length === 1 ? 'entry' : 'entries'}</h3>
       ${list.map((n) => `<div class="note">
@@ -1598,6 +1598,7 @@ function openIncidentNotes(key, keepScroll) {
       if (!text && !photo) return toast('Write a note or add a photo');
       const [lng, lat] = f ? f.geometry.coordinates : [null, null];
       const note = { id: uid(), incident: key, incidentName: name, lat, lng, at: Date.now(), by: localStorage.getItem('by') || '', text, photo };
+      if (SYNC.room && !$('[name=share]', el)?.checked) note.private = true;
       await DB.put('notes', note); S.notes.push(note); syncNote(note); refreshIncidentIcons();
       toast('Note added'); openIncidentNotes(key);
     };
@@ -1803,7 +1804,7 @@ async function activateRoom(room) {
 
 // Called after local saves/deletes; Firestore queues these when offline.
 function syncFeature(f) {
-  if (!SYNC.room || !SYNC.fb) return;
+  if (!SYNC.room || !SYNC.fb || f.private) return;
   if (f.room && f.room !== SYNC.room.id) return; // belongs to another room
   f.room = SYNC.room.id; DB.put('features', f);
   const { db, fs } = SYNC.fb;
@@ -1815,7 +1816,7 @@ function unsyncFeature(f) {
   fs.deleteDoc(fs.doc(db, 'rooms', SYNC.room.id, 'features', f.id)).catch(() => {});
 }
 function syncNote(n) {
-  if (!SYNC.room || !SYNC.fb) return;
+  if (!SYNC.room || !SYNC.fb || n.private) return;
   n.room = SYNC.room.id; DB.put('notes', n);
   const { db, fs } = SYNC.fb;
   fs.setDoc(fs.doc(db, 'rooms', SYNC.room.id, 'notes', n.id), noteToDoc(n)).catch((e) => { SYNC.lastError = e.message; updateSyncPill(); });
@@ -1862,6 +1863,8 @@ function sharingSection() {
       <div class="room-name">${esc(r.name)}</div>
       <div class="hint">${SYNC.pending ? 'Changes queued, will sync with signal' : SYNC.fromCache ? 'Connecting…' : 'Live, all changes synced'}</div>
       <div class="room-code">${esc(prettyCode(r.id))}</div>
+      <div id="sh-qr" class="room-qr" aria-label="QR code to join this room"></div>
+      <div class="hint">Crew can scan this with their phone camera to join.</div>
       <div class="btns"><button class="btn primary" id="sh-share">Invite crew…</button><button class="btn" id="sh-copy">${ICON.copy} Copy code</button></div>
     </div>
     <h3>In this room: ${SYNC.members.length}</h3>
@@ -1905,6 +1908,304 @@ async function initSharing() {
 }
 addEventListener('online', updateSyncPill); addEventListener('offline', updateSyncPill);
 
+// ---------------------------------------------------------------- private vs shared (per item)
+function shareToggle(isPrivate) {
+  if (!SYNC.room) return '';
+  return `<div class="radios" style="margin-top:12px"><label><input type="checkbox" name="share" ${isPrivate ? '' : 'checked'}> Share with <b>${esc(SYNC.room.name)}</b></label></div>
+    <p class="hint">Unchecked = private, stays only on this phone.</p>`;
+}
+function applyShareChoice(f, el) {
+  const box = $('[name=share]', el); if (!box) return;
+  if (box.checked) { delete f.private; }
+  else { if (f.room) { unsyncFeature(f); delete f.room; } f.private = true; }
+}
+
+// ---------------------------------------------------------------- GeoPDF: sharp detail when zoomed in
+// The overview image is capped (~4000 px). When you zoom past it, re-render just the visible part of the
+// original PDF at screen resolution and lay it over the overview with the same georeference.
+const pdfDocs = {};
+function getPdfDoc(id) {
+  if (!pdfDocs[id]) {
+    pdfDocs[id] = (async () => {
+      const rec = await DB.get('maps', id);
+      if (!rec?.pdf) return null;
+      await loadScript(LIBS.pdfjs);
+      window.pdfjsLib.GlobalWorkerOptions.workerSrc = LIBS.pdfjsWorker;
+      return window.pdfjsLib.getDocument({ data: new Uint8Array(await rec.pdf.arrayBuffer()) }).promise;
+    })().catch((e) => { console.error('pdf', e); return null; });
+  }
+  return pdfDocs[id];
+}
+const detail = {}; // map id -> { layer, seq }
+let detailTimer;
+function scheduleDetail() { clearTimeout(detailTimer); detailTimer = setTimeout(renderDetails, 350); }
+map.on('moveend zoomend', scheduleDetail);
+function clearDetail(id) {
+  const d = detail[id]; if (!d) return;
+  d.seq = (d.seq || 0) + 1;
+  if (d.layer) { map.removeLayer(d.layer); URL.revokeObjectURL(d.layer._url); d.layer = null; }
+}
+async function renderDetails() {
+  for (const m of S.maps) {
+    const base = G.maps[m.id];
+    if (!m.on || !m.hasPdf || !base || !map.hasLayer(base) || !base._img?.naturalWidth) { clearDetail(m.id); continue; }
+    const [tl, tr, bl] = base._c.map((c) => map.latLngToLayerPoint(c));
+    const ex = { x: tr.x - tl.x, y: tr.y - tl.y }, ey = { x: bl.x - tl.x, y: bl.y - tl.y };
+    const pageScreenW = Math.hypot(ex.x, ex.y), pageScreenH = Math.hypot(ey.x, ey.y);
+    if (pageScreenW / base._img.naturalWidth < 1.15) { clearDetail(m.id); continue; } // overview already sharp
+    const det = ex.x * ey.y - ex.y * ey.x; if (!det) continue;
+    const uv = (p) => { const dx = p.x - tl.x, dy = p.y - tl.y; return [(dx * ey.y - dy * ey.x) / det, (ex.x * dy - ex.y * dx) / det]; };
+    const sz = map.getSize();
+    const pts = [[0, 0], [sz.x, 0], [0, sz.y], [sz.x, sz.y]].map((c) => uv(map.containerPointToLayerPoint(c)));
+    const pad = 0.08;
+    let u0 = Math.min(...pts.map((p) => p[0])), u1 = Math.max(...pts.map((p) => p[0]));
+    let v0 = Math.min(...pts.map((p) => p[1])), v1 = Math.max(...pts.map((p) => p[1]));
+    const du = (u1 - u0) * pad, dv = (v1 - v0) * pad;
+    u0 = Math.max(0, u0 - du); u1 = Math.min(1, u1 + du); v0 = Math.max(0, v0 - dv); v1 = Math.min(1, v1 + dv);
+    if (u1 <= u0 || v1 <= v0) { clearDetail(m.id); continue; } // map is off screen
+    const d = (detail[m.id] = detail[m.id] || { seq: 0 });
+    const seq = ++d.seq;
+    const doc = await getPdfDoc(m.id); if (!doc || seq !== d.seq) continue;
+    const page = await doc.getPage(1); if (seq !== d.seq) continue;
+    const vp1 = page.getViewport({ scale: 1, rotation: 0 });
+    const rw = (u1 - u0) * vp1.width, rh = (v1 - v0) * vp1.height;
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    let s = ((u1 - u0) * pageScreenW * dpr) / rw;
+    s = Math.min(s, 4096 / rw, 4096 / rh, Math.sqrt(14e6 / (rw * rh)), 16);
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.max(1, Math.round(rw * s)); canvas.height = Math.max(1, Math.round(rh * s));
+    const ctx = canvas.getContext('2d'); ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+    try {
+      await page.render({ canvasContext: ctx, viewport: page.getViewport({ scale: s, rotation: 0 }),
+        transform: [1, 0, 0, 1, -u0 * vp1.width * s, -v0 * vp1.height * s] }).promise;
+    } catch (e) { continue; }
+    if (seq !== d.seq) continue;
+    const blob = await new Promise((r) => canvas.toBlob(r, 'image/jpeg', 0.9)); canvas.width = canvas.height = 0;
+    if (seq !== d.seq || !blob) continue;
+    const P = (u, v) => map.layerPointToLatLng(L.point(tl.x + u * ex.x + v * ey.x, tl.y + u * ex.y + v * ey.y));
+    const layer = new AffineImage(URL.createObjectURL(blob), [P(u0, v0), P(u1, v0), P(u0, v1)], { opacity: m.opacity }).addTo(map);
+    const old = d.layer; d.layer = layer;
+    if (old) setTimeout(() => { map.removeLayer(old); URL.revokeObjectURL(old._url); }, 400);
+  }
+}
+
+// ---------------------------------------------------------------- on-map switcher for GeoPDFs (fire progression)
+function updateMapSwitcher() {
+  const wrap = $('#mapsw'); if (!wrap) return;
+  wrap.classList.toggle('hidden', !S.maps.length);
+  $('#mapsw-btn').innerHTML = `${ICON.pdf}<span>${S.maps.filter((m) => m.on).length}/${S.maps.length}</span>`;
+  const list = $('#mapsw-list');
+  list.innerHTML = S.maps.map((m) => `<button data-sw="${m.id}" class="${m.on ? 'on' : ''}">${m.on ? '●' : '○'} ${esc(m.name)}</button>`).join('')
+    + `<div class="mapsw-row"><button data-sw-all="1">All on</button><button data-sw-all="0">All off</button></div>
+       <p class="hint">Tap a map to show only that one. Long-press to add it alongside.</p>`;
+  list.querySelectorAll('[data-sw]').forEach((b) => {
+    let timer, long = false;
+    b.onpointerdown = () => { long = false; timer = setTimeout(() => { long = true; const m = S.maps.find((x) => x.id === b.dataset.sw); setMapOn(m.id, !m.on); }, 500); };
+    b.onpointerup = b.onpointerleave = () => clearTimeout(timer);
+    b.onclick = () => { if (long) return; S.maps.forEach((m) => setMapOn(m.id, m.id === b.dataset.sw)); };
+  });
+  list.querySelectorAll('[data-sw-all]').forEach((b) => (b.onclick = () => S.maps.forEach((m) => setMapOn(m.id, b.dataset.swAll === '1'))));
+}
+$('#mapsw-btn').onclick = () => $('#mapsw-list').classList.toggle('hidden');
+
+// ---------------------------------------------------------------- Send to incident GIS (one zip, everything needed)
+function dataUrlBytes(u) { const b = atob(u.split(',')[1] || ''); const a = new Uint8Array(b.length); for (let i = 0; i < b.length; i++) a[i] = b.charCodeAt(i); return a; }
+function buildGisPackage() {
+  const feats = S.features, notes = notesAsFeatures(), who = localStorage.getItem('by') || 'Unknown';
+  const files = [];
+  const gj = toGeoJSON(feats);
+  gj.features.forEach((f) => { if (f.properties.photo) { f.properties.photo = `photos/${f.id}.jpg`; } });
+  files.push({ name: 'fireline-features.geojson', data: JSON.stringify(gj, null, 1) });
+  files.push({ name: 'fireline-features.kml', data: toKML(feats, true) });
+  files.push({ name: 'points-and-triage.csv', data: toCSV(feats) });
+  if (notes.length) files.push({ name: 'incident-notes.geojson', data: JSON.stringify(toGeoJSON(notes), null, 1) });
+  if (S.track?.points.length > 1) files.push({ name: 'gps-track.gpx', data: toGPX([], true) });
+  let photos = 0;
+  for (const f of feats) if (f.props.photo?.startsWith('data:image')) { files.push({ name: `photos/${f.id}.jpg`, data: dataUrlBytes(f.props.photo) }); photos++; }
+  for (const n of S.notes) if (n.photo?.startsWith('data:image')) { files.push({ name: `photos/note-${n.id}.jpg`, data: dataUrlBytes(n.photo) }); photos++; }
+  const counts = ['point', 'line', 'polygon', 'triage'].map((k) => `${feats.filter((f) => f.kind === k).length} ${k}s`).join(', ');
+  files.unshift({ name: 'README.txt', data: [
+    'FireLine Field data package for incident GIS',
+    `Collected by: ${who}`, `Room: ${SYNC.room ? SYNC.room.name : '(none)'}`, `Exported: ${new Date().toISOString()}`,
+    `Contents: ${counts}, ${notes.length} incident notes, ${photos} photos${S.track?.points.length > 1 ? ', GPS track' : ''}`,
+    'Coordinates: WGS84 (EPSG:4326), longitude/latitude. Elevations in feet (USGS 3DEP) where present.',
+    'Feature categories follow NIFS event layer naming (FeatureCategory field).',
+    'Files: .geojson for ArcGIS Pro/Online and QGIS, .kml for Google Earth, .csv for spreadsheets, .gpx track, photos/ folder.',
+  ].join('\r\n') });
+  return { name: `fireline-to-GIS-${who.replace(/[^a-z0-9]+/gi, '-').slice(0, 30)}-${stamp()}.zip`, data: zipStore(files), n: feats.length + notes.length, photos };
+}
+async function sendToGis() {
+  const pkg = buildGisPackage();
+  if (!pkg.n) return toast('Nothing collected yet');
+  const file = new File([pkg.data], pkg.name, { type: 'application/zip' });
+  if (navigator.canShare && navigator.canShare({ files: [file] })) {
+    try { await navigator.share({ files: [file], title: 'FireLine data for incident GIS', text: `FireLine Field data from ${localStorage.getItem('by') || 'the field'}: ${pkg.n} items, ${pkg.photos} photos.` }); return; }
+    catch (e) { if (e.name === 'AbortError') return; }
+  }
+  download(pkg.name, pkg.data, 'application/zip'); toast(`Saved ${pkg.name}. Email or hand it to your GISS.`, 5000);
+}
+
+// ---------------------------------------------------------------- QR code room invites
+const QR_LIB = 'https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js';
+async function drawRoomQr(el) {
+  if (!el || !SYNC.room) return;
+  try {
+    await loadScript(QR_LIB);
+    const qr = window.qrcode(0, 'M'); qr.addData(joinLink(SYNC.room.id)); qr.make();
+    el.innerHTML = qr.createSvgTag({ cellSize: 5, margin: 3, scalable: true });
+  } catch { el.innerHTML = '<p class="hint">QR code needs signal the first time.</p>'; }
+}
+
+// ---------------------------------------------------------------- reference library (offline PDFs)
+async function importDocs(files) {
+  let n = 0;
+  for (const file of files) {
+    if (!/pdf$/i.test(file.type) && !/\.pdf$/i.test(file.name)) continue;
+    await DB.put('docs', { id: uid(), name: file.name.replace(/\.pdf$/i, ''), size: file.size, addedAt: Date.now(), pdf: file });
+    n++;
+  }
+  toast(n ? `Added ${n} document${n > 1 ? 's' : ''} to your library` : 'Only PDF files can be added');
+  openKey = null; openPanel('library');
+}
+let docState = null;
+async function openDoc(id) {
+  const rec = await DB.get('docs', id); if (!rec) return;
+  closePanel();
+  const box = $('#docview'), pages = $('#docview-pages');
+  $('#docview-title').textContent = rec.name; pages.innerHTML = '<p class="hint" style="padding:16px">Opening…</p>';
+  box.classList.remove('hidden');
+  try {
+    await loadScript(LIBS.pdfjs); window.pdfjsLib.GlobalWorkerOptions.workerSrc = LIBS.pdfjsWorker;
+    const doc = await window.pdfjsLib.getDocument({ data: new Uint8Array(await rec.pdf.arrayBuffer()) }).promise;
+    docState = { doc, zoom: 1, obs: null };
+    layoutDoc();
+  } catch (e) { pages.innerHTML = `<p class="hint" style="padding:16px">Couldn't open this PDF: ${esc(e.message)}</p>`; }
+}
+async function layoutDoc() {
+  const { doc, zoom } = docState, pages = $('#docview-pages');
+  docState.obs?.disconnect(); pages.innerHTML = '';
+  const first = await doc.getPage(1), vp = first.getViewport({ scale: 1 });
+  const w = Math.min(pages.clientWidth - 16, 900) * zoom, h = (w * vp.height) / vp.width;
+  const obs = (docState.obs = new IntersectionObserver((ents) => ents.forEach((en) => { if (en.isIntersecting) renderDocPage(en.target); }), { root: pages, rootMargin: '600px 0px' }));
+  for (let i = 1; i <= doc.numPages; i++) {
+    const c = document.createElement('canvas'); c.className = 'docpage'; c.dataset.page = i; c.style.width = w + 'px'; c.style.height = h + 'px';
+    pages.appendChild(c); obs.observe(c);
+  }
+  $('#docview-info').textContent = `${doc.numPages} pages · ${Math.round(zoom * 100)}%`;
+}
+async function renderDocPage(c) {
+  if (c.dataset.done) return; c.dataset.done = '1';
+  const page = await docState.doc.getPage(+c.dataset.page);
+  const cssW = parseFloat(c.style.width), dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const vp = page.getViewport({ scale: (cssW * dpr) / page.getViewport({ scale: 1 }).width });
+  c.width = vp.width; c.height = vp.height;
+  await page.render({ canvasContext: c.getContext('2d'), viewport: vp }).promise;
+}
+$('#docview-close').onclick = () => { $('#docview').classList.add('hidden'); docState?.obs?.disconnect(); docState?.doc?.destroy(); docState = null; $('#docview-pages').innerHTML = ''; };
+$('#docview-in').onclick = () => { if (docState) { docState.zoom = Math.min(4, docState.zoom * 1.4); layoutDoc(); } };
+$('#docview-out').onclick = () => { if (docState) { docState.zoom = Math.max(0.6, docState.zoom / 1.4); layoutDoc(); } };
+
+async function renderLibrary(el) {
+  const docs = (await DB.all('docs').catch(() => [])).sort((a, b) => b.addedAt - a.addedAt);
+  el.append(h(`
+    <h3>My reference documents</h3>
+    <p class="hint">Keep the IRPG, IAPs, ICS forms or any PDF on this phone. They open with no signal.</p>
+    <label class="btn primary block">${ICON.book} Add PDF documents<input type="file" id="doc-file" accept="application/pdf,.pdf" multiple hidden></label>
+    ${docs.map((d) => `<div class="row"><span class="grow" data-doc="${d.id}" style="cursor:pointer">${ICON.pdf} ${esc(d.name)}<small>${(d.size / 1048576).toFixed(1)} MB · added ${fmtDate(d.addedAt)}</small></span>
+      <button class="btn" data-doc="${d.id}">Open</button><button class="btn danger" data-doc-del="${d.id}" aria-label="Delete document">✕</button></div>`).join('') || '<p class="hint">No documents yet.</p>'}
+    <h3>Get official documents</h3>
+    <p class="hint">Download the PDF from NWCG, then tap <b>Add PDF documents</b> above and pick it from your downloads.</p>
+    <a class="btn block" href="https://www.nwcg.gov/publications/pms461" target="_blank" rel="noopener">Incident Response Pocket Guide (IRPG, PMS 461)</a>
+    <a class="btn block" href="https://www.nwcg.gov/publications" target="_blank" rel="noopener">All NWCG publications</a>
+    <h3>Fire intel & accounts</h3>
+    <p class="hint"><b>FireGuard</b> (DoD satellite fire mapping, as often as every 15 min) and NIFS editing need a free NIFC ArcGIS account, open to federal, state, local and tribal firefighters and cooperators.</p>
+    <a class="btn block" href="https://support-nifc.hub.arcgis.com/" target="_blank" rel="noopener">Request a NIFC account</a>
+    <a class="btn block" href="https://iaa-nifc.hub.arcgis.com/pages/fireguard" target="_blank" rel="noopener">FireGuard info (IAA hub)</a>
+    <a class="btn block" href="https://data-nifc.opendata.arcgis.com/search" target="_blank" rel="noopener">NIFC Open Data</a>
+    <a class="btn block" href="https://www.nifc.gov/nicc/incident-information/imsr" target="_blank" rel="noopener">National situation report (IMSR)</a>
+    <h3>Field reminder</h3>
+    <p class="hint"><b>LCES</b>: Lookouts, Communications, Escape routes, Safety zones. Mark them on the map before engaging.</p>`));
+  $('#doc-file', el).onchange = (e) => importDocs([...e.target.files]);
+  el.querySelectorAll('[data-doc]').forEach((b) => (b.onclick = () => openDoc(b.dataset.doc)));
+  el.querySelectorAll('[data-doc-del]').forEach((b) => (b.onclick = async () => {
+    if (!confirm('Remove this document from your phone?')) return;
+    await DB.del('docs', b.dataset.docDel); openKey = null; openPanel('library');
+  }));
+}
+
+// ---------------------------------------------------------------- weather radar, wind arrows, slope shading
+map.createPane('wx').style.zIndex = 260;
+const radarUrl = () => `https://mesonet.agron.iastate.edu/cache/tile.py/1.0.0/nexrad-n0q-900913/{z}/{x}/{y}.png?t=${Math.floor(Date.now() / 300000)}`;
+G.radar = L.tileLayer(radarUrl(), { pane: 'wx', opacity: 0.6, maxNativeZoom: 12, maxZoom: 19, attribution: 'Radar: NEXRAD via Iowa Environmental Mesonet' });
+setInterval(() => { if (map.hasLayer(G.radar)) G.radar.setUrl(radarUrl()); }, 300000);
+
+G.wind = L.layerGroup();
+let windTimer;
+async function refreshWind() {
+  if (!map.hasLayer(G.wind)) return;
+  const b = map.getBounds().pad(-0.06), cols = 5, rows = 7, lats = [], lngs = [];
+  for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
+    lats.push((b.getNorth() - ((r + 0.5) * (b.getNorth() - b.getSouth())) / rows).toFixed(3));
+    lngs.push((b.getWest() + ((c + 0.5) * (b.getEast() - b.getWest())) / cols).toFixed(3));
+  }
+  let data;
+  try {
+    const r = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lats}&longitude=${lngs}&current=wind_speed_10m,wind_direction_10m,wind_gusts_10m&wind_speed_unit=mph&timezone=auto`, { signal: timeoutSignal(15000) });
+    data = await r.json(); if (!Array.isArray(data)) data = [data];
+    DB.put('kv', { at: Date.now(), data }, 'wind:last').catch(() => {});
+  } catch {
+    const c = await DB.get('kv', 'wind:last').catch(() => null);
+    if (!c) return toast('Wind needs signal');
+    data = c.data; toast('Offline: showing wind saved ' + fmtDate(c.at));
+  }
+  G.wind.clearLayers();
+  for (const p of data) {
+    const cur = p.current; if (!cur) continue;
+    const to = (cur.wind_direction_10m + 180) % 360, spd = Math.round(cur.wind_speed_10m), gst = Math.round(cur.wind_gusts_10m);
+    const strong = spd >= 20 || gst >= 30;
+    L.marker([p.latitude, p.longitude], { pane: 'wx', interactive: false, icon: L.divIcon({ className: 'wind-ico', iconSize: [46, 46], iconAnchor: [23, 23],
+      html: `<div class="wind-arrow ${strong ? 'strong' : ''}" style="transform:rotate(${to}deg)">${svg('<path d="M12 3v15M6.5 9.5L12 3l5.5 6.5" stroke-width="2.6"/>')}</div><b class="wind-lbl ${strong ? 'strong' : ''}">${spd}${gst > spd + 4 ? `<small>G${gst}</small>` : ''}</b>` }) }).addTo(G.wind);
+  }
+}
+map.on('moveend', () => { clearTimeout(windTimer); windTimer = setTimeout(refreshWind, 700); });
+setInterval(refreshWind, 900000);
+
+// Slope shading computed on the phone from free elevation tiles (AWS Terrain Tiles / Mapzen terrarium).
+const SLOPE_CLASSES = [ // percent slope
+  { min: 20, max: 40, color: [255, 214, 0], label: '20–40%' },
+  { min: 40, max: 60, color: [255, 140, 0], label: '40–60%' },
+  { min: 60, max: 80, color: [230, 40, 40], label: '60–80%' },
+  { min: 80, max: 1e9, color: [140, 40, 200], label: '80%+' },
+];
+const SlopeLayer = L.GridLayer.extend({
+  createTile(coords, done) {
+    const tile = document.createElement('canvas'); tile.width = tile.height = 256;
+    const img = new Image(); img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      try {
+        const ctx = tile.getContext('2d'); ctx.drawImage(img, 0, 0);
+        const src = ctx.getImageData(0, 0, 256, 256), px = src.data, out = ctx.createImageData(256, 256), o = out.data;
+        const elev = new Float32Array(256 * 256);
+        for (let i = 0; i < elev.length; i++) elev[i] = px[i * 4] * 256 + px[i * 4 + 1] + px[i * 4 + 2] / 256 - 32768;
+        const lat = (Math.atan(Math.sinh(Math.PI * (1 - (2 * (coords.y + 0.5)) / 2 ** coords.z))) * 180) / Math.PI;
+        const m = (40075016.686 * Math.cos((lat * Math.PI) / 180)) / (256 * 2 ** coords.z); // meters per pixel
+        const at = (x, y) => elev[Math.min(255, Math.max(0, y)) * 256 + Math.min(255, Math.max(0, x))];
+        for (let y = 0; y < 256; y++) for (let x = 0; x < 256; x++) {
+          const dzdx = (at(x + 1, y) - at(x - 1, y)) / (2 * m), dzdy = (at(x, y + 1) - at(x, y - 1)) / (2 * m);
+          const pct = Math.hypot(dzdx, dzdy) * 100, k = (y * 256 + x) * 4;
+          const c = SLOPE_CLASSES.find((s) => pct >= s.min && pct < s.max);
+          if (c) { o[k] = c.color[0]; o[k + 1] = c.color[1]; o[k + 2] = c.color[2]; o[k + 3] = 150; }
+        }
+        ctx.putImageData(out, 0, 0); done(null, tile);
+      } catch (e) { done(e, tile); }
+    };
+    img.onerror = () => done(new Error('no elevation tile'), tile);
+    img.src = `https://s3.amazonaws.com/elevation-tiles-prod/terrarium/${coords.z}/${coords.x}/${coords.y}.png`;
+    return tile;
+  },
+});
+G.slope = new SlopeLayer({ pane: 'wx', opacity: 0.6, maxNativeZoom: 15, maxZoom: 19, minZoom: 8, attribution: 'Slope from AWS Terrain Tiles (Mapzen, USGS 3DEP)' });
+
 // ---------------------------------------------------------------- misc wiring
 map.on('mousemove', (e) => { $('#coords').textContent = ddm(e.latlng.lat, e.latlng.lng); });
 map.on('moveend', () => { if (!matchMedia('(hover: hover)').matches) { const c = map.getCenter(); $('#coords').textContent = '⌖ ' + ddm(c.lat, c.lng); } });
@@ -1940,7 +2241,8 @@ async function hashPass(pass) {
 function getSession() {
   try {
     const s = JSON.parse(localStorage.getItem('session') || 'null');
-    return s && s.passHash === CFG.passHash ? s : null; // a new passcode signs everyone out
+    if (!s || !s.name) return null;
+    return !CFG.passHash || s.passHash === CFG.passHash ? s : null; // a new passcode signs everyone out
   } catch { return null; }
 }
 function requireLogin() {
@@ -1948,17 +2250,18 @@ function requireLogin() {
     const existing = getSession();
     if (existing) return resolve(existing);
     const box = $('#login'), form = $('#login-form'), err = $('#login-err');
-    form.elements.name.value = localStorage.getItem('by') || '';
+    form.elements.name.value = localStorage.getItem('by')?.replace(/ \(.*\)$/, '') || '';
+    if (!CFG.passHash) { form.elements.pass.closest('label').remove(); }
     box.classList.remove('hidden');
     form.onsubmit = async (e) => {
       e.preventDefault();
-      if ((await hashPass(form.elements.pass.value)) !== CFG.passHash) {
+      if (CFG.passHash && (await hashPass(form.elements.pass.value)) !== CFG.passHash) {
         err.classList.remove('hidden'); form.elements.pass.value = ''; form.elements.pass.focus(); return;
       }
       const s = { name: form.elements.name.value.trim(), crew: form.elements.crew.value.trim(), passHash: CFG.passHash, at: Date.now() };
       localStorage.setItem('session', JSON.stringify(s));
       localStorage.setItem('by', `${s.name} (${s.crew})`);
-      form.elements.pass.value = ''; err.classList.add('hidden'); box.classList.add('hidden');
+      if (form.elements.pass) form.elements.pass.value = ''; err.classList.add('hidden'); box.classList.add('hidden');
       resolve(s);
     };
   });

@@ -1,6 +1,6 @@
 // Service worker: makes the app open instantly and the map draw with no signal.
 // Bump V together with the ?v= numbers in index.html on every release.
-const V = '13';
+const V = '14';
 const SHELL = 'fireline-shell-v' + V;
 const TILES = 'fireline-tiles';
 const SHELL_FILES = [
@@ -15,6 +15,7 @@ const SHELL_FILES = [
   'https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js',
   'https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js',
   'https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js',
+  'https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js',
 ];
 const TILE_HOSTS = ['basemap.nationalmap.gov', 'server.arcgisonline.com', 'tile.opentopomap.org', 'tile.openstreetmap.org'];
 
@@ -33,7 +34,8 @@ self.addEventListener('fetch', (e) => {
   if (e.request.method !== 'GET') return;
 
   // Map tiles: cache-first, and remember every tile you've looked at.
-  if (TILE_HOSTS.some((h) => url.hostname.endsWith(h))) {
+  const isElevation = url.hostname === 's3.amazonaws.com' && url.pathname.startsWith('/elevation-tiles-prod/');
+  if (isElevation || TILE_HOSTS.some((h) => url.hostname.endsWith(h))) {
     e.respondWith(caches.open(TILES).then(async (c) => {
       const hit = await c.match(e.request.url);
       if (hit) return hit;
@@ -49,7 +51,7 @@ self.addEventListener('fetch', (e) => {
   // Live data (ArcGIS REST, USGS elevation): always network; the app keeps its own offline copy.
   if (url.pathname.includes('/arcgis/rest/') || url.hostname === 'epqs.nationalmap.gov') return;
 
-  const isShell = url.origin === location.origin || url.hostname === 'unpkg.com' || (url.hostname === 'www.gstatic.com' && url.pathname.startsWith('/firebasejs/'));
+  const isShell = url.origin === location.origin || url.hostname === 'unpkg.com' || (url.hostname === 'www.gstatic.com' && url.pathname.startsWith('/firebasejs/')) || url.hostname === 'cdnjs.cloudflare.com';
   if (!isShell) return;
 
   // App files: serve the saved copy instantly (works on no signal or weak "lie-fi"),

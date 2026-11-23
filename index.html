@@ -6,14 +6,14 @@
   <meta name="theme-color" content="#0a0606">
   <title>FireLine Field</title>
   <link rel="manifest" href="manifest.webmanifest">
-  <link rel="icon" href="icon.svg?v=13" type="image/svg+xml">
-  <link rel="apple-touch-icon" href="icon.svg?v=13">
+  <link rel="icon" href="icon.svg?v=14" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icon.svg?v=14">
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
-  <link rel="stylesheet" href="styles.css?v=13">
+  <link rel="stylesheet" href="styles.css?v=14">
 </head>
 <body>
   <header class="topbar">
-    <div class="brand"><img src="icon.svg?v=13" alt="" width="26" height="26"><span>FIRELINE<b>FIELD</b></span></div>
+    <div class="brand"><img src="icon.svg?v=14" alt="" width="26" height="26"><span>FIRELINE<b>FIELD</b></span></div>
     <div class="status">
       <span id="net" class="pill">online</span>
       <span id="gps" class="pill off">GPS off</span>
@@ -52,7 +52,7 @@
     <button data-panel="tools"><span data-icon="nav"></span>Nav</button>
     <button data-panel="triage"><span data-icon="triage"></span>Triage</button>
     <button data-panel="data"><span data-icon="data"></span>Data</button>
-    <button data-panel="intel"><span data-icon="intel"></span>Intel</button>
+    <button data-panel="library"><span data-icon="book"></span>Library</button>
   </nav>
 
   <aside id="panel" class="panel hidden" aria-live="polite">
@@ -64,11 +64,23 @@
   </aside>
 
   <div id="toast" class="toast hidden"></div>
+  <div id="mapsw" class="mapsw hidden">
+    <button id="mapsw-btn" class="mapsw-btn" aria-label="Switch incident maps"></button>
+    <div id="mapsw-list" class="mapsw-list hidden"></div>
+  </div>
+  <div id="docview" class="docview hidden" role="dialog" aria-label="Document viewer">
+    <div class="docview-head">
+      <button id="docview-close" aria-label="Close document">✕</button>
+      <div class="docview-title"><b id="docview-title"></b><small id="docview-info"></small></div>
+      <button id="docview-out" aria-label="Zoom out">−</button><button id="docview-in" aria-label="Zoom in">+</button>
+    </div>
+    <div id="docview-pages" class="docview-pages"></div>
+  </div>
   <button id="update-bar" class="update-bar hidden">New version ready. Tap to update.</button>
 
   <div id="login" class="login hidden">
     <form id="login-form" class="login-card" autocomplete="on">
-      <img src="icon.svg?v=13" alt="" width="64" height="64">
+      <img src="icon.svg?v=14" alt="" width="64" height="64">
       <h1>FIRELINE<b>FIELD</b></h1>
       <p class="hint">Crew sign-in</p>
       <label class="f">Your name<input name="name" required autocomplete="name" placeholder="J. Smith"></label>
@@ -81,9 +93,9 @@
   </div>
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-  <script src="firebase-config.js?v=13"></script>
-  <script src="config.js?v=13"></script>
-  <script src="db.js?v=13"></script>
-  <script src="app.js?v=13"></script>
+  <script src="firebase-config.js?v=14"></script>
+  <script src="config.js?v=14"></script>
+  <script src="db.js?v=14"></script>
+  <script src="app.js?v=14"></script>
 </body>
 </html>

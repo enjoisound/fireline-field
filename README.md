@@ -6,12 +6,12 @@ A simple, offline-first web app for wildland firefighters. It runs in any phone 
 
 | Tab | Features |
 |---|---|
-| **Maps** | **Import GeoPDF incident maps from the IAP**: stored on the phone, work offline, show your GPS dot and markup on top, with an opacity slider. **NWS red flag warnings & fire weather watches** (nationwide, with a flashing banner if you're standing in one). Live NIFC data (public, no login): current incidents, current fire perimeters, VIIRS/MODIS hotspots (last 48 h). **Tap a fire for Notes & photos**: a timestamped, signed log anyone on the phone can add to. Basemaps: **USGS Topo** (default, free to download for offline), satellite with roads & labels, clean satellite, USGS shaded relief + streams, Esri Topo, OpenTopoMap, streets. |
+| **Maps** | **Find a fire** by name. **Import GeoPDF incident maps from the IAP**: stored on the phone, work offline, stay **sharp when zoomed in** (the visible area is re-rendered from the original PDF), with an opacity slider and an **on-map switcher** to flip between maps (fire progression). **Weather radar**, **wind arrows** (speed & gusts) and **slope shading** (percent slope classes). **NWS red flag warnings & fire weather watches** (nationwide, with a flashing banner if you're standing in one). Live NIFC data (public, no login): current incidents, current fire perimeters, VIIRS/MODIS hotspots (last 48 h). **Tap a fire for Notes & photos**: a timestamped, signed log anyone on the phone can add to. Basemaps: **USGS Topo** (default, free to download for offline), satellite with roads & labels, clean satellite, USGS shaded relief + streams. |
 | **Mark** | **20 map-pin icons** in groups: command & support (ICP flag, staging, camp/base, drop point, helibase, helispot, medical, supply/fuel, comms), safety (safety zone, escape route, lookout, hazard, road closure), fire (origin, spot fire) and resources (dozer, engine, crew, water). Labels show on the map. **Lines** use incident-map style: dozer line with X's, hand line with tick marks, proposed lines dashed, plus fire edge, contingency, wet line, escape route and more. **Trace GPS** draws a line as you drive or walk it (great for dozer line), keeping the screen awake. Areas: daily perimeter, heat, divisions… Tap the map, use **+ GPS**, or long-press anywhere → **Mark here**. Shows live length in chains/feet/miles and area in acres. Every point gets its ground elevation automatically. |
 | **Nav** | **Spot weather** for your location or any point: NWS alerts, an 18-hour table of temperature, humidity, wind and rain (red-flag-type hours highlighted) and the forecast; saved for offline. **Navigate to any waypoint, marker, incident or typed coordinate**: live distance, true bearing (plus magnetic if you set your declination), elevation climb/descent and average slope. Your position, accuracy, ground elevation and GPS altitude; copy your coordinates. Distance/bearing and area measuring. Breadcrumb tracking (save a walked track as a line). |
 | **Triage** | Structure triage using NWCG categories (Prep and Leave, Stand Alone, Prep and Defend, Rescue Drill), plus status, roof, defensible space, access, water, hazards, residents, notes and a photo. Summary counts per category. |
-| **Data** | Export **all data, one kind, or a single layer/category** (or your **incident notes**) as **KML** (Google Earth, Avenza, Gaia, CalTopo, ArcGIS), **GPX** (handheld GPS units), **GeoJSON** (ArcGIS, QGIS, NIFS), **CSV**, or a **TAK data package** (ATAK/iTAK/WinTAK: points arrive as TAK markers, lines/areas as an overlay), with or without your track. Share sheet, import GeoJSON, **download the on-screen map area for offline use**. |
-| **Intel** | Incident search, plus links to FireGuard, NIFC AGOL account request, NIFC Open Data, EGP/WildFireSA, IMSR and IAA. |
+| **Data** | **Send to incident GIS**: one zip with all your map data, triage, incident notes, photos and GPS track (GeoJSON, KML, CSV, GPX + README) for the GISS. Export **all data, one kind, or a single layer/category** (or your **incident notes**) as **KML** (Google Earth, Avenza, Gaia, CalTopo, ArcGIS), **GPX** (handheld GPS units), **GeoJSON** (ArcGIS, QGIS, NIFS), **CSV**, or a **TAK data package** (ATAK/iTAK/WinTAK: points arrive as TAK markers, lines/areas as an overlay), with or without your track. Share sheet, import GeoJSON, **download the on-screen map area for offline use**. |
+| **Library** | Keep the **IRPG, IAPs, ICS forms or any PDF** on the phone and read them offline in the built-in viewer. Links to NWCG publications, FireGuard/NIFC account info, NIFC Open Data and the national situation report. |
 
 Tap any marker or incident for **Navigate**, **Copy** and **Weather** (coordinates in DDM + decimal). Long-press / right-click the map anywhere for the coordinate, its elevation, Navigate and Copy.
 
@@ -26,6 +26,8 @@ Everything you collect is stored on the device (IndexedDB), so it works with no 
 In **Data → Live team sharing**, create a room for an incident or crew (e.g. "Sawtooth Fire: Div A") and tap **Invite crew…** to text the join link or code. Everyone in the room sees each other's **markers, lines, areas, structure triage and incident notes/photos** live on their map.
 
 - **Works offline:** changes made with no signal are queued on the phone (top bar shows **⇅ QUEUED**) and sync automatically when coverage returns (**⇅ LIVE · number of people**).
+- **Invite by QR code:** the room card shows a QR code crew can scan with their phone camera.
+- **Private items:** when you're in a room, each marker, triage record or note has a **Share with room** checkbox; unchecked items stay only on your phone.
 - **Who can see it:** only people who joined with the room's code. The code is long and random, so treat it like a password. The room's creator can remove people. Leaving keeps a copy of everything on your phone.
 - **No extra accounts:** each phone signs in to Firebase anonymously in the background; names come from the crew sign-in.
 - Want to share data you collected before joining? **Share my existing data**.
@@ -34,7 +36,7 @@ In **Data → Live team sharing**, create a room for an incident or crew (e.g. "
 
 ## Crew sign-in
 
-The app opens with a sign-in screen asking for name, crew/resource and a shared crew passcode. Each device stays signed in (so it opens offline), and the name is stamped on everything collected. Sign out is under **Data**.
+The app opens with a sign-in screen asking for name and crew/resource (no passcode by default; run `python set_passcode.py "code"` to add one, `--off` to remove it). Each device stays signed in (so it opens offline), and the name is stamped on everything collected. Sign out is under **Data**.
 
 To change the passcode (this signs everyone out):
 
